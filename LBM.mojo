@@ -1,16 +1,13 @@
 from std.gpu.host import DeviceContext
-from std.sys import has_accelerator
-from std.gpu import block_idx,thread_idx
-from layout import TileTensor,coord
-from layout.tile_layout import Layout,row_major,Coord,TensorLayout
 
-from std.gpu import block_dim, block_idx, thread_idx
+from layout import TileTensor
+from layout.tile_layout import Layout,row_major,Coord,TensorLayout
 from std.math import ceildiv
 from std.collections import InlineArray
 from std.memory import Pointer
 from std.collections import Set,Dict
 
-from flags import *
+
 from contextTensor import ContextTileTensor
 from vector import Vector
 
@@ -44,7 +41,6 @@ struct LatticeModel[D:Int,Q:Int,float_dtype:DType,int_dtype:DType](ImplicitlyCop
                     self.opposite_indices[i] = self.int_scalar(k)
                     break
 
-
 def get_D2Q9[float_dtype:DType = DType.float32,int_dtype:DType = DType.int32]() -> LatticeModel[2,9,float_dtype,int_dtype]:  
     comptime D = 2
     comptime Q = 9
@@ -65,7 +61,7 @@ def get_D2Q9[float_dtype:DType = DType.float32,int_dtype:DType = DType.int32]() 
                                         ]
     float_directions = InlineArray[float_vector,Q](uninitialized = True)
     for i in range(Q):
-        _ = float_directions[i].__init__(float_directions_list[i])
+        float_directions[i].fill_from_list(float_directions_list[i])
     
     directions_list:List[List[Scalar[int_dtype]]] =
                                     [
@@ -82,7 +78,7 @@ def get_D2Q9[float_dtype:DType = DType.float32,int_dtype:DType = DType.int32]() 
 
     directions = InlineArray[int_vector,Q](uninitialized = True)
     for i in range(Q):
-        _ = directions[i].__init__(directions_list[i])
+        directions[i].fill_from_list(directions_list[i])
 
     weights =  Vector[float_dtype,Q](
                                     4./9.,                          # 0: Center
@@ -93,8 +89,13 @@ def get_D2Q9[float_dtype:DType = DType.float32,int_dtype:DType = DType.int32]() 
     return LatticeModel[D,Q,float_dtype,int_dtype](directions,float_directions,weights)
     
 
-struct LBM_Grid[float_dtype:DType,int_dtype:DType,D:Int,Q:Int,//,latticeModel:LatticeModel[D,Q,float_dtype,int_dtype],nx:Int,ny:Int,nz:Int]():
+struct LBM_Grid[float_dtype:DType,int_dtype:DType,D:Int,Q:Int,//,
+                latticeModel:LatticeModel[D,Q,float_dtype,int_dtype],
+                nx:Int,ny:Int,nz:Int,
+                
+                ](): 
     comptime float_scalar = Scalar[Self.float_dtype]
+
     var dx:Self.float_scalar
     var area:Self.float_scalar
     var volume:Self.float_scalar
@@ -162,78 +163,6 @@ def set_outer_walls[float_dtype:DType where float_dtype.is_floating_point(),BCLa
     # Density
     bc_rho = bc.slice(x_slice,y_slice,z_slice,(D,D+1))
     _ = bc_rho.fill(density)
-
-
-def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,Flayout:TensorLayout,BCLayout:TensorLayout,FlagLayout:TensorLayout,
-                //,
-                lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
-                ]
-                ( 
-                f_out:TileTensor[float_dtype,Flayout,MutAnyOrigin],
-                f_in:TileTensor[float_dtype,Flayout,MutAnyOrigin],
-                bc:TileTensor[float_dtype,BCLayout,MutAnyOrigin],
-                flags:TileTensor[DType.uint8,FlagLayout,MutAnyOrigin],
-                grid_shape:Vector[DType.int32,3],
-                inv_tau:Scalar[float_dtype]
-                ):
-    
-    comptime assert f_in.flat_rank == 4 and f_in.flat_rank == f_out.flat_rank
-    comptime assert bc.flat_rank == 4
-    comptime assert flags.flat_rank == 3
-    
-    x = block_dim.x * block_idx.x + thread_idx.x
-    y = block_dim.y * block_idx.y + thread_idx.y
-    z = block_dim.z * block_idx.z + thread_idx.z
-    index = Vector[DType.int32,3](Int32(x),Int32(y),Int32(z))
-
-    if index[0] < grid_shape[0] and index[1] < grid_shape[1] and index[2] < grid_shape[3]: # Basic Guard
-        var f_new = Vector[float_dtype,D](fill = 0.)
-        var velocity = Vector[float_dtype,D]()
-        for q in range(Q):
-            f_opp = f_in[lattice_model.opposite_indices[q],x,y,z]
-            direction = lattice_model.directions[q]
-            
-            pull_index = get_adjacent_idx[D,-1](index,grid_shape,direction) # Pulling Scheme
-            pulled_f = f_in[q,pull_index[0],pull_index[1],pull_index[2]]
-            
-            comptime for ii in range(D):
-                velocity[ii] = bc[pull_index[0],pull_index[1],pull_index[2],ii]
-            rho = bc[pull_index[0],pull_index[1],pull_index[2],D]
-
-            if flags[pull_index[0],pull_index[1],pull_index[2]] == 0: # Stream
-                f_new[q] = pulled_f
-            elif flags[pull_index[0],pull_index[1],pull_index[2]] == 1: # BounceBack with moving wall BC put together (2nd term is 0 if stationary wall)
-                f_new[q] = f_opp + 2.*3.*lattice_model.weights[q]*rho*(lattice_model.float_directions[q].dot(velocity))
-
-        # Get Velocity and Density
-        velocity.fill(0)
-        rho = 0
-        for q in range(Q):
-            rho += f_new[q]
-            velocity += f_new[q]*lattice_model.float_directions[q]
-        velocity /= rho
-
-        # Collision Term
-        for q in range(Q):
-            f_eq = BGK_Collision(lattice_model.weights[q],rho,velocity,lattice_model.float_directions[q])
-            f_new[q] += inv_tau*(f_eq - f_new[q])
-
-        for q in range(Q):
-            f_out[q,x,y,z] = f_new[q]
-
-def get_adjacent_idx[D:Int,shift:Int32 = 1](index:Vector[DType.int32,3],grid_shape:Vector[DType.int32,3],direction:Vector[DType.int32,D],) -> Vector[DType.int32,3]:
-    comptime assert D <= 3 
-    adj_index = Vector[DType.int32,3]()
-    comptime for d in range(D):
-        adj_index[d] = (index[d] + shift*direction[d]) % grid_shape[d]
-    return adj_index
-
-
-def BGK_Collision[dtype:DType,D:Int,//](weight:Scalar[dtype],density:Scalar[dtype],velocity:Vector[dtype,D],direction:Vector[dtype,D]) -> Scalar[dtype]:
-    comptime assert dtype.is_floating_point(), 'DType to BGK_collision term should be Float point like' # Weied using where statement cause compile error?
-    ei_dot_u = velocity.dot(direction)
-    return weight*density*(1 + 3.*ei_dot_u + 4.5*ei_dot_u*ei_dot_u +- 1.5*velocity.dot(velocity))
-
 
     
 

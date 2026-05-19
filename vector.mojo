@@ -20,7 +20,7 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable):
             numbers: Scalar[DType] a variadic list of Scalars to pass into the list
         '''
         assert len(numbers) == Self.size, 'Number of inputs must match'
-        self.data = InlineArray[Scalar[Self.dtype],Self.size]()
+        self.data = InlineArray[Scalar[Self.dtype],Self.size](uninitialized = True)
         
         for i in range(Self.size):
             self.data[i] = numbers[i]
@@ -46,8 +46,13 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable):
         # self.data[idx] = 
         self.data[idx] = value
 
+    def fill_from_list(mut self,list:List[Scalar[Self.dtype]]):
+        assert len(list) == Self.size
+        for i in range(Self.size):
+            self.data[i] = list[i]
+        
 
-    def fill(mut self,value:Scalar[self.dtype]):
+    def fill(mut self,value:Scalar[Self.dtype]):
         for i in range(Self.size):
             self.data[i] = value
 
@@ -73,6 +78,13 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable):
             out *= self[i]
         return out
     
+    def write_to(self, mut writer: Some[Writer]):
+        s:String  = '['
+        for i in range(Self.size):
+            s += ' {},'.format(self[i])
+        s+= ']'
+        writer.write(s)
+
     @always_inline
     @staticmethod
     def _elementWise[func: def(Scalar[Self.dtype],Scalar[Self.dtype]) -> Scalar[Self.dtype]](a:Self,b:Self) -> Self:

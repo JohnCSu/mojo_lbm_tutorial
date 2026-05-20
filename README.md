@@ -1,4 +1,4 @@
-# MOJO_SIM
+# MOJO-LBM-Tutorial
 
 <table>
   <tr>
@@ -43,9 +43,9 @@ Its simplicity allows one to capture fluid motion in a single tight kernel ~ 50 
 ## Custom Structs
 
 ### Vector
-Stack allocated vector with value semantics and support for standard ops (+-*/) with same vector type or scalars. Also support sum, prod with oneself and dot product with another vector. An InlineArray stores the data inside the vector.
+Stack allocated vector with value semantics (i.e. ImplicitelyCopyable Trait and so behaves like a number) and support for standard ops (+-*/) with same vector type or scalars. Also support sum, prod with oneself and dot product with another vector. An InlineArray stores the data inside the vector.
 
-Currently Not Simd optimized (may change)
+Currently Not Simd optimized for large vector (uses simple for loops)
 
 ### ContextTileTensor
 Simple Struct that manages the host and device buffer together and keeps the 2 buffers in sync. Uses familiar `.cpu()` and `.gpu()` getters to call the
@@ -54,14 +54,14 @@ Tensor as a cpu or gpu tile tensor respecitively. Buffer copies between the 2 bu
 ```mojo
     a = ContextTileTensor(ctx,layout)
 
-    cpu_ar = a.cpu() # No Copy as initial call
+    cpu_tensor = a.cpu() # No Copy as initial call
     # Some CPU Work Here
     # ...
-    gpu_ar = a.gpu() # Copy is performed from Host Buffer (CPU) to Device Buffer (GPU)
+    gpu_tensor = a.gpu() # Copy is performed from Host Buffer (CPU) to Device Buffer (GPU)
     # Some Gpu Work Here...
-    gpu_ar2 = a.gpu() # No Copy as last call was the same GPU
-    
-    cpu_ar = a.cpu() # Copy is perfomed from GPU to CPU
+    gpu_tensor2 = a.gpu() # No Copy as last call was the same GPU
+      
+    cpu_tensor = a.cpu() # Copy is perfomed from GPU to CPU
     
 ```
 

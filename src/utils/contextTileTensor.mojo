@@ -3,6 +3,7 @@ from std.gpu import HostBuffer,DeviceBuffer
 from layout import TileTensor,row_major,coord,Coord
 from layout.tile_layout import Layout,TensorLayout
 from std.collections import Set
+from std.python import Python, PythonObject
 
 struct ContextTileTensor[dtype:DType,LayoutType:TensorLayout]():
     '''
@@ -86,6 +87,19 @@ struct ContextTileTensor[dtype:DType,LayoutType:TensorLayout]():
         self._check_last_used_device(currentDevice = 'gpu')
         return self._gpu_buffer
 
+    def cpu(mut self) raises -> TileTensor[Self.dtype,Self.LayoutType,origin_of(self._cpu_buffer)]:
+        self._check_last_used_device(currentDevice = 'cpu')
+        return TileTensor(self._cpu_buffer,self.layout)
+
+    def gpu(mut self) raises -> TileTensor[Self.dtype,Self.LayoutType,origin_of(self._gpu_buffer)]:
+        self._check_last_used_device(currentDevice = 'gpu')
+        return TileTensor(self._gpu_buffer,self.layout)
+
+    def buffer_to_numpy(mut self) raises -> PythonObject:
+        '''
+        returns a view of the host buffer as a 1D Numpy Array. Unsafe Pointer Used!
+        '''
+        return contextTensor_to_numpy(self)
 
     def _check_last_used_device(mut self,currentDevice:String) raises:
         if currentDevice not in Set[String]('cpu','gpu'):
@@ -103,11 +117,37 @@ struct ContextTileTensor[dtype:DType,LayoutType:TensorLayout]():
             self.last_device_used = currentDevice
 
 
+def contextTensor_to_numpy[dtype:DType,layoutType:TensorLayout](mut contextTensor:ContextTileTensor[dtype,layoutType]) raises -> PythonObject:
+    '''
+    Zero Copy view of the Host Buffer of Context Tensor as a numpy array, by first syncing device and host buffers and passing an unsafe pointer to
+    numpy.
+    
+    as of now returns the buffer as a 1D numpy array (as tile layouts may not be strictly row or column major)
 
-    def cpu(mut self) raises -> TileTensor[Self.dtype,Self.LayoutType,origin_of(self._cpu_buffer)]:
-        self._check_last_used_device(currentDevice = 'cpu')
-        return TileTensor(self._cpu_buffer,self.layout)
+    NOTE: Changes to the array will affect 
+    '''
+    np = Python.import_module('numpy')
+    ctypes = Python.import_module("ctypes")
 
-    def gpu(mut self) raises -> TileTensor[Self.dtype,Self.LayoutType,origin_of(self._gpu_buffer)]:
-        self._check_last_used_device(currentDevice = 'gpu')
-        return TileTensor(self._gpu_buffer,self.layout)
+    ctypes_dict = {
+        DType.bool: ctypes.c_bool,
+        DType.int8: ctypes.c_int8,
+        DType.int16: ctypes.c_int16,
+        DType.int32: ctypes.c_int32,
+        DType.int64: ctypes.c_int64,
+        DType.uint8: ctypes.c_uint8,
+        DType.uint16: ctypes.c_uint16,
+        DType.uint32: ctypes.c_uint32,
+        DType.uint64: ctypes.c_uint64,
+        DType.float32: ctypes.c_float,
+        DType.float64: ctypes.c_double,
+    }
+
+    c_dtype = ctypes_dict[dtype]
+    
+    flag_ptr = contextTensor.cpu_buffer().unsafe_ptr()
+    address = Int(flag_ptr) # Need to get the pointer address as Int type
+    p_int = ctypes.POINTER(c_dtype) # Set Dtype
+    np_ptr = ctypes.cast(address, p_int)
+    np_arr = np.ctypeslib.as_array(np_ptr, shape=Python.tuple(contextTensor.size))
+    return np_arr

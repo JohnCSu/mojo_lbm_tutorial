@@ -7,9 +7,9 @@ from std.collections import InlineArray
 from std.memory import Pointer
 from std.collections import Set,Dict
 
-
-from contextTensor import ContextTileTensor
-from vector import Vector
+# from  import ContextTileTensor,Vector
+# from ..utils import ContextTileTensor,Vector
+from src.utils import Vector,ContextTileTensor
 
 struct LatticeModel[D:Int,Q:Int,float_dtype:DType,int_dtype:DType](ImplicitlyCopyable):
     comptime int_vector = Vector[Self.int_dtype,Self.D]
@@ -126,7 +126,7 @@ def set_outer_walls[float_dtype:DType where float_dtype.is_floating_point(),BCLa
                     (flags:TileTensor[DType.uint8,FlagLayout,flag_origin],
                             bc:TileTensor[float_dtype,BCLayout,bc_origin],
                             side:String,
-                            boundary_type:Int,
+                            boundary_type:Scalar[DType.uint8],
                             velocity:List[Scalar[float_dtype]],
                             density:Scalar[float_dtype]) raises:
 

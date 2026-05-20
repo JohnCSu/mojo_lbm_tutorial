@@ -1,4 +1,4 @@
-struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable):
+struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & Writable):
     '''
     Create a stack allocated vector of DType elements. Not optimised to use SIMD so you 
     should only use this for small vectors where SIMD is not worth it. Uses unrolling
@@ -78,12 +78,12 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable):
             out *= self[i]
         return out
     
-    def write_to(self, mut writer: Some[Writer]):
-        s:String  = '['
-        for i in range(Self.size):
-            s += ' {},'.format(self[i])
-        s+= ']'
-        writer.write(s)
+    # def write_to(self, mut writer: Some[Writer]):
+    #     # s:String  = '['
+    #     # for i in range(Self.size):
+    #     #     s += ' {},'.format(self[i])
+    #     # s+= ']'
+    #     writer.write('[',self.data,']')
 
     @always_inline
     @staticmethod

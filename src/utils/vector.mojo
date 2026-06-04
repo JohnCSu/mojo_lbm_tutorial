@@ -48,12 +48,12 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & W
 
     def fill_from_list(mut self,list:List[Scalar[Self.dtype]]):
         assert len(list) == Self.size
-        for i in range(Self.size):
+        comptime for i in range(Self.size):
             self.data[i] = list[i]
         
 
     def fill(mut self,value:Scalar[Self.dtype]):
-        for i in range(Self.size):
+        comptime for i in range(Self.size):
             self.data[i] = value
 
     @always_inline
@@ -87,14 +87,15 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & W
 
     @always_inline
     @staticmethod
-    def _elementWise[func: def(Scalar[Self.dtype],Scalar[Self.dtype]) -> Scalar[Self.dtype]](a:Self,b:Self) -> Self:
+    def _elementWise[func: def(Scalar[Self.dtype],Scalar[Self.dtype]) thin -> Scalar[Self.dtype]](a:Self,b:Self) -> Self:
         out = Self()
         comptime for i in range(Self.size):
             out[i] = func(a[i],b[i])
         return out
+        
     @always_inline
     @staticmethod
-    def _scalarOp[func: def(Scalar[Self.dtype],Scalar[Self.dtype]) -> Scalar[Self.dtype], *, reverse:Bool = False](a:Self,b:Scalar[Self.dtype]) -> Self:
+    def _scalarOp[func: def(Scalar[Self.dtype],Scalar[Self.dtype]) thin ->   Scalar[Self.dtype], *, reverse:Bool = False](a:Self,b:Scalar[Self.dtype]) -> Self:
         out = Self()
         comptime for i in range(Self.size):
             comptime if reverse:

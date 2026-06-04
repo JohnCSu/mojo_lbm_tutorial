@@ -116,7 +116,7 @@ struct LBM_Grid[float_dtype:DType,int_dtype:DType,D:Int,Q:Int,//,
         self.bc_field_size = (Self.D+1)*self.num_points
 
 
-def set_outer_walls[float_dtype:DType where float_dtype.is_floating_point(),BCLayout:TensorLayout,FlagLayout:TensorLayout,flag_origin:Origin[mut=True],bc_origin:Origin[mut=True],
+def set_outer_walls[float_dtype:DType,BCLayout:TensorLayout,FlagLayout:TensorLayout,flag_origin:Origin[mut=True],bc_origin:Origin[mut=True],
                     //,
                     D:Int,
                     nx:Int,
@@ -130,7 +130,8 @@ def set_outer_walls[float_dtype:DType where float_dtype.is_floating_point(),BCLa
                             velocity:List[Scalar[float_dtype]],
                             density:Scalar[float_dtype]) raises:
 
-    
+    comptime assert float_dtype.is_floating_point()
+    comptime assert flags.flat_rank == 3 and bc.flat_rank == 4
     axes:Dict[String,Int] = {'X':0,
                     'Y':1,
                     'Z':2,}
@@ -138,35 +139,64 @@ def set_outer_walls[float_dtype:DType where float_dtype.is_floating_point(),BCLa
     # (side) in valid_strings
     assert side in valid_strings, 'Must be valid string'
     axis = axes[String(side[byte = 1])]
-    # range_values = [[0,nx-1 if nx > 1 else 1],[0,ny-1 if ny > 1 else 1],[0,nz-1 if nz > 1 else 1]]
-    range_values = [[0,nx],[0,ny],[0,nz]]
     
+    
+
+    # Layout independent
+    end_values = [nx,ny,nz]
     if side[byte = 0] == '-':
-        range_values[axis] = [0,1]
+        fixed = 0
     else:
-        end_index = range_values[axis][1] - 1
-        range_values[axis] = [end_index,end_index+1]
-    
-    x_slice = Tuple(range_values[0][0],range_values[0][1])
-    y_slice = Tuple(range_values[1][0],range_values[1][1])
-    z_slice = Tuple(range_values[2][0],range_values[2][1])
-    
-    #Set Flags
-    boundary = flags.slice(x_slice,y_slice,z_slice)
-    _ = boundary.fill(flags.ElementType(boundary_type))
+        fixed = end_values[axis] - 1
 
-    # Velocity
-    for i in range(D):
-        bc_vel = bc.slice(x_slice,y_slice,z_slice,(i,i+1))
-        _ = bc_vel.fill(velocity[i])
+    if axis == 0: # X-axis, fix x and loop
+        for y in range(ny):
+            for z in range(nz):
+                flags[fixed,y,z] = flags.ElementType(boundary_type)
+                comptime for i in range(D):
+                    bc[fixed,y,z,i] = velocity[i]
+                bc[fixed,y,z,D] = density
+    elif axis == 1:
+        for x in range(nx):
+            for z in range(nz):
+                flags[x,fixed,z] = flags.ElementType(boundary_type)
+                comptime for i in range(D):
+                    bc[x,fixed,z,i] = velocity[i]
+                bc[x,fixed,z,D] = density
+    else: # Loop Z-face
+        for x in range(nx):
+            for y in range(ny):
+                flags[x,y,fixed] = flags.ElementType(boundary_type)
+                comptime for i in range(D):
+                    bc[x,y,fixed,i] = velocity[i]
+                bc[x,y,fixed,D] = density
+    # Set Flags
+    # range_values = [[0,nx],[0,ny],[0,nz]]
+    # if side[byte = 0] == '-':
+    #     range_values[axis] = [0,1]
+    # else:
+    #     end_index = range_values[axis][1] - 1
+    #     range_values[axis] = [end_index,end_index+1]
     
-    # Density
-    bc_rho = bc.slice(x_slice,y_slice,z_slice,(D,D+1))
-    _ = bc_rho.fill(density)
+    # x_slice = Tuple(range_values[0][0],range_values[0][1])
+    # y_slice = Tuple(range_values[1][0],range_values[1][1])
+    # z_slice = Tuple(range_values[2][0],range_values[2][1])
+    
 
-    
+    # # 
+    # boundary = flags.slice(x_slice,y_slice,z_slice)
+    # _ = boundary.fill(flags.ElementType(boundary_type))
 
+    # # Velocity
+    # for i in range(D):
+    #     bc_vel = bc.slice(x_slice,y_slice,z_slice,(i,i+1))
+    #     _ = bc_vel.fill(velocity[i])
     
+    # # Density
+    # bc_rho = bc.slice(x_slice,y_slice,z_slice,(D,D+1))
+    # _ = bc_rho.fill(density)
+
+
 
 
 

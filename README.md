@@ -27,8 +27,10 @@ A basic implementation for 2D D2Q9 LBM for Mojo using only the Standard Library 
 5. Basic Origin tracking
 6. Mojo Packaging
 
-## Current State
+## Timeline
+2026/06/04 Implemeted First Variation that uses thread reording
 2026/05/20 LBM working with mid-gridbounce bounceback and moving wall BC. Row Major. Base Example
+
 
 ## LBM
 Lattice Boltzmann Method (LBM) is a fluid simulation based on the Boltzmann Equation and specifically made for GPU like compute. It is an explicit time stepping algorithim (so no solving systems of equations) and performed on a structured grid. The Single relaxation time (SRT) model implemented is designed for incompressible flow (Mach number less than 0.3)

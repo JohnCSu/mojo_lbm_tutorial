@@ -31,7 +31,7 @@ comptime density_layout = row_major[nx,ny,nz]()
 comptime velocity_layout = row_major[D,nx,ny,nz]()
 
 comptime grid = LBM_Grid[D2Q9,nx,ny,nz](dx)
-
+comptime all_slice = slice(None,None,None)
 
 def main() raises:
     print(GRID_DIM)
@@ -47,13 +47,6 @@ def main() raises:
     tau = v_lat/(1/3.) +0.5
     print('Tau {}'.format(tau))
 
-    np = Python.import_module('numpy')
-    pd = Python.import_module('pandas')
-    pv = Python.import_module('pyvista')
-    plt = Python.import_module('matplotlib.pyplot')
-    ctypes = Python.import_module("ctypes")
-
-    print('Success!')
     ctx = DeviceContext()
     
     flags = ContextTileTensor[DType.uint8](ctx,flag_layout)
@@ -80,14 +73,23 @@ def main() raises:
     _ = f.gpu()
     _ = f_out.gpu()
 
+    ff = flags.buffer_to_numpy().reshape(nx,ny)
+    print(ff)
+    
+    uu = bc.buffer_to_numpy().reshape(nx,ny,D+1)
+    print(uu[all_slice,all_slice,0])
+    print(uu[all_slice,all_slice,1])
+    print(uu[all_slice,all_slice,2])
+
     ctx.synchronize()
     #Compile Functions
     LBM_func = ctx.compile_function[LBM_kernel[grid,f_layout,bc_layout,flag_layout],LBM_kernel[grid,f_layout,bc_layout,flag_layout]]()
     calc_rho_and_u_gpu = ctx.compile_function[calculate_rho_and_velocity[grid,f_layout,density_layout,velocity_layout],calculate_rho_and_velocity[grid,f_layout,density_layout,velocity_layout]]()
+ 
     ctx.synchronize()
 
     # Run Simulation
-    for t in range(100_000):
+    for t in range(10_000):
         ctx.enqueue_function(LBM_func,f_out.gpu(),f.gpu(),bc.gpu(),flags.gpu(),1/tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
         ctx.enqueue_function(LBM_func,f.gpu(),f_out.gpu(),bc.gpu(),flags.gpu(),1/tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
         if t % 1000 == 0 :
@@ -102,7 +104,13 @@ def main() raises:
     ctx.enqueue_function(calc_rho_and_u_gpu,f.gpu(),rho.gpu(),u.gpu(),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
 
     ctx.synchronize()
-    # f_np = contextTensor_to_numpy(f).flatten()
+    
+    np = Python.import_module('numpy')
+    pd = Python.import_module('pandas')
+    pv = Python.import_module('pyvista')
+    plt = Python.import_module('matplotlib.pyplot')
+    ctypes = Python.import_module("ctypes")
+
     u_np = (u.buffer_to_numpy()/U).reshape(D,nx,ny,nz)
     print('step = {} max ={} avg = {}'.format(0,u_np.max(),u_np.mean()) )
 
@@ -112,10 +120,10 @@ def main() raises:
     xx,yy = m[0],m[1]
     pv_mesh = pv.StructuredGrid(xx, yy, np.zeros_like(xx))
     
-    all = slice(None,None,None)
+    
 
-    u_plot = u_np[0,all,all,all]
-    v_plot = u_np[1,all,all,all]
+    u_plot = u_np[0,all_slice,all_slice,all_slice]
+    v_plot = u_np[1,all_slice,all_slice,all_slice]
 
     u_mag = np.sqrt(u_plot**2 + v_plot**2)
     pv_mesh.point_data['U_mag'] = u_mag.ravel()
@@ -137,7 +145,7 @@ def main() raises:
     v_05 = horizontal_line.point_data['V velocity']
     
     plt.plot(v_benchmark['%x'],v_benchmark['100'],'o',label = 'Ghia et al')
-    plt.plot(horizontal_line.points[all,0],v_05,label ='lbm Results')
+    plt.plot(horizontal_line.points[all_slice,0],v_05,label ='lbm Results')
     plt.xlabel('x')
     plt.ylabel('v velocity')
     plt.legend()
@@ -148,7 +156,7 @@ def main() raises:
     u_05 = vertical_line.point_data['U velocity']
     
     plt.plot(u_benchmark['%y'],u_benchmark['100'],'o',label = 'Ghia et al')
-    plt.plot(vertical_line.points[all,1],u_05,label ='lbm Results')
+    plt.plot(vertical_line.points[all_slice,1],u_05,label ='lbm Results')
     plt.xlabel('y')
     plt.ylabel('u velocity')
     plt.legend()

@@ -28,6 +28,7 @@ A basic implementation for 2D D2Q9 LBM for Mojo using only the Standard Library 
 6. Mojo Packaging
 
 ## Timeline
+2026/06/05 Implemented TiledLayouts for LBM
 2026/06/04 Implemeted First Variation that uses thread reording
 2026/05/20 LBM working with mid-gridbounce bounceback and moving wall BC. Row Major. Base Example
 

@@ -1,6 +1,5 @@
 from std.gpu.host import DeviceContext
-
-from layout import TileTensor
+from layout import TileTensor,LayoutTensor
 from layout.tile_layout import Layout,row_major,Coord,TensorLayout
 from std.math import ceildiv
 from std.collections import InlineArray
@@ -116,22 +115,38 @@ struct LBM_Grid[float_dtype:DType,int_dtype:DType,D:Int,Q:Int,//,
         self.bc_field_size = (Self.D+1)*self.num_points
 
 
-def set_outer_walls[float_dtype:DType,BCLayout:TensorLayout,FlagLayout:TensorLayout,flag_origin:Origin[mut=True],bc_origin:Origin[mut=True],
+
+def set_outer_walls[float_dtype:DType,
+                    flag_origin:Origin[mut=True],
+                    bc_origin:Origin[mut=True],
+                    nx:Int,ny:Int,nz:Int,
+                    D:Int,Q:Int,
+                    latticeModel:LatticeModel[D,Q,float_dtype,DType.int32],
                     //,
-                    D:Int,
-                    nx:Int,
-                    ny:Int,
-                    nz:Int,
+                    grid:LBM_Grid[latticeModel,nx,ny,nz],
+                    FlagLayout:Layout[_,_],
+                    BCLayout:Layout[_,_],
                     ]
-                    (flags:TileTensor[DType.uint8,FlagLayout,flag_origin],
-                            bc:TileTensor[float_dtype,BCLayout,bc_origin],
+                    (flags:TileTensor[DType.uint8,type_of(FlagLayout),flag_origin],
+                            bc:TileTensor[float_dtype,type_of(BCLayout),bc_origin],
                             side:String,
                             boundary_type:Scalar[DType.uint8],
                             velocity:List[Scalar[float_dtype]],
                             density:Scalar[float_dtype]) raises:
+    '''
+    Apply Boundary conditions to the outer walls. Uses LayoutTensor conversion to allow for layout independent indexing based on
+    Tensor rank.
 
+    '''
     comptime assert float_dtype.is_floating_point()
-    comptime assert flags.flat_rank == 3 and bc.flat_rank == 4
+    comptime assert flags.rank == 3 and bc.rank == 4
+    
+    comptime flag_as_lt = LayoutTensor[DType.uint8,FlagLayout.to_layout(),flag_origin]
+    comptime bc_as_lt = LayoutTensor[float_dtype,BCLayout.to_layout(),bc_origin]
+
+    flags_lt = flag_as_lt(flags.ptr)
+    bc_lt = bc_as_lt(bc.ptr)
+
     axes:Dict[String,Int] = {'X':0,
                     'Y':1,
                     'Z':2,}
@@ -140,8 +155,6 @@ def set_outer_walls[float_dtype:DType,BCLayout:TensorLayout,FlagLayout:TensorLay
     assert side in valid_strings, 'Must be valid string'
     axis = axes[String(side[byte = 1])]
     
-    
-
     # Layout independent
     end_values = [nx,ny,nz]
     if side[byte = 0] == '-':
@@ -152,50 +165,24 @@ def set_outer_walls[float_dtype:DType,BCLayout:TensorLayout,FlagLayout:TensorLay
     if axis == 0: # X-axis, fix x and loop
         for y in range(ny):
             for z in range(nz):
-                flags[fixed,y,z] = flags.ElementType(boundary_type)
+                flags_lt[fixed,y,z] = flags.ElementType(boundary_type)
                 comptime for i in range(D):
-                    bc[fixed,y,z,i] = velocity[i]
-                bc[fixed,y,z,D] = density
+                    bc_lt[fixed,y,z,i] = velocity[i]
+                bc_lt[fixed,y,z,D] = density
     elif axis == 1:
         for x in range(nx):
             for z in range(nz):
-                flags[x,fixed,z] = flags.ElementType(boundary_type)
+                flags_lt[x,fixed,z] = flags.ElementType(boundary_type)
                 comptime for i in range(D):
-                    bc[x,fixed,z,i] = velocity[i]
-                bc[x,fixed,z,D] = density
+                    bc_lt[x,fixed,z,i] = velocity[i]
+                bc_lt[x,fixed,z,D] = density
     else: # Loop Z-face
         for x in range(nx):
             for y in range(ny):
-                flags[x,y,fixed] = flags.ElementType(boundary_type)
+                flags_lt[x,y,fixed] = flags.ElementType(boundary_type)
                 comptime for i in range(D):
-                    bc[x,y,fixed,i] = velocity[i]
-                bc[x,y,fixed,D] = density
-    # Set Flags
-    # range_values = [[0,nx],[0,ny],[0,nz]]
-    # if side[byte = 0] == '-':
-    #     range_values[axis] = [0,1]
-    # else:
-    #     end_index = range_values[axis][1] - 1
-    #     range_values[axis] = [end_index,end_index+1]
-    
-    # x_slice = Tuple(range_values[0][0],range_values[0][1])
-    # y_slice = Tuple(range_values[1][0],range_values[1][1])
-    # z_slice = Tuple(range_values[2][0],range_values[2][1])
-    
-
-    # # 
-    # boundary = flags.slice(x_slice,y_slice,z_slice)
-    # _ = boundary.fill(flags.ElementType(boundary_type))
-
-    # # Velocity
-    # for i in range(D):
-    #     bc_vel = bc.slice(x_slice,y_slice,z_slice,(i,i+1))
-    #     _ = bc_vel.fill(velocity[i])
-    
-    # # Density
-    # bc_rho = bc.slice(x_slice,y_slice,z_slice,(D,D+1))
-    # _ = bc_rho.fill(density)
-
+                    bc_lt[x,y,fixed,i] = velocity[i]
+                bc_lt[x,y,fixed,D] = density
 
 
 

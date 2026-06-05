@@ -1,33 +1,44 @@
 from std.gpu.host import DeviceContext
 from layout import TileTensor
-from layout.tile_layout import Layout,row_major,TensorLayout
+from layout.tile_layout import Layout,row_major,TensorLayout,blocked_product,col_major
 from std.python import Python, PythonObject
 from std.gpu import block_dim, block_idx, thread_idx
 from std.math import ceildiv
+
 from std.collections import InlineArray
 from src.lbm import SOLID_NODE,FLUID_NODE,LBM_Grid,get_D2Q9,set_outer_walls,calculate_rho_and_velocity
+from src.lbm.variations.tiled import LBM_kernel
 from src.utils import Vector,ContextTileTensor
-from src.lbm.variations.reorderThreads import LBM_kernel
 
 comptime float_dtype = DType.float32
 comptime int_dtype = DType.int32
 comptime float_scalar = Scalar[float_dtype]
 comptime D2Q9 = get_D2Q9[DType.float32,DType.int32]()
 comptime D,Q = (2,9)
-comptime N = 101
+comptime N = 128
 comptime L = 1.
 comptime dx = L/float_scalar(N-1)
 comptime (nx,ny,nz) = (N,N,1)
 comptime num_points = nx*ny*nz
 
-comptime THREADS_PER_BLOCK = 64
-comptime BLOCK_SHAPE = (8,8,1)
+comptime THREADS_PER_BLOCK = 256
+comptime BLOCK_SHAPE = (16,16,1)
 comptime GRID_DIM = ((nx) // BLOCK_SHAPE[0]+1,(ny) // BLOCK_SHAPE[1]+1, 1 )# Plus one
+comptime tile_size = 16
+comptime n_tiles = N//tile_size
 
-# This can be stored in LBM Grid
-comptime flag_layout = row_major[nx,ny,nz]()
-comptime f_layout = row_major[Q,nx,ny,nz]()
-comptime bc_layout = row_major[nx,ny,nz,D+1]()
+comptime flag_tile = col_major[tile_size,tile_size,1]()
+comptime f_tile = col_major[1,tile_size,tile_size,1]()
+comptime bc_tile = col_major[tile_size,tile_size,1,1]()
+
+comptime flag_tiler = row_major[n_tiles,n_tiles,1]()
+comptime f_tiler = row_major[Q,n_tiles,n_tiles,1]()
+comptime bc_tiler = row_major[n_tiles,n_tiles,1,D+1]()
+
+comptime flag_layout = blocked_product(flag_tile,flag_tiler)
+comptime f_layout = blocked_product(f_tile,f_tiler)
+comptime bc_layout = blocked_product(bc_tile,bc_tiler)
+
 comptime density_layout = row_major[nx,ny,nz]()
 comptime velocity_layout = row_major[D,nx,ny,nz]()
 
@@ -35,9 +46,11 @@ comptime grid = LBM_Grid[D2Q9,nx,ny,nz](dx)
 comptime all_slice = slice(None,None,None)
 
 def main() raises:
+    comptime assert N % tile_size == 0 , 'tile_size must divide N'
     print(GRID_DIM)
     print(BLOCK_SHAPE)
-
+    assert N % tile_size == 0, 'Tile Size must Divide N' 
+    
     U_phs:float_scalar = 1.
     U:float_scalar = 0.05
     viscosity:float_scalar = 1/100.
@@ -62,6 +75,7 @@ def main() raises:
 
     f.fill(1./Float32(Q))
     f_out.fill(1./Float32(Q))
+
     set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'+Y',SOLID_NODE,[U,0],1.)
     set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'-Y',SOLID_NODE,[0,0],1.)
     set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'-X',SOLID_NODE,[0,0],1.)
@@ -113,6 +127,8 @@ def main() raises:
     xx,yy = m[0],m[1]
     pv_mesh = pv.StructuredGrid(xx, yy, np.zeros_like(xx))
     
+    
+
     u_plot = u_np[0,all_slice,all_slice,all_slice]
     v_plot = u_np[1,all_slice,all_slice,all_slice]
 
@@ -153,4 +169,63 @@ def main() raises:
     plt.legend()
     plt.show()
         
+    
+    # print(b_np.reshape(nx,ny,D+1)[slice(None,None,None),slice(None,None,None),0])
+    # print(f_np.reshape(Q,nx,ny)[0,slice(None,None,None),slice(None,None,None)])
+    # print(flag_np.reshape(nx,ny))
+
+
+    # print(u_np.reshape(N,N,D)[slice(None,None,None),slice(None,None,None),0])
+    
+    
+    # flag_ptr = flags.cpu_buffer().unsafe_ptr()
+    # f_add = Int(flag_ptr) # Need to get the pointer address as Int type
+    # p_int = ctypes.POINTER(ctypes.c_uint8) # Set Dtype
+    # np_ptr = ctypes.cast(f_add, p_int)
+    # np_flag = np.ctypeslib.as_array(np_ptr, shape=Python.tuple(flags.size))
+
+    # print(np_flag.reshape(Python.tuple(nx,ny)))
+    
+
+    # f_ptr = f.cpu_buffer().unsafe_ptr()
+    # f_add = Int(f_ptr) # Need to get the pointer address as Int type
+    # p_float = ctypes.POINTER(ctypes.c_float) # Set Dtype
+    # np_ptr = ctypes.cast(f_add, p_float)
+    # np_f = np.ctypeslib.as_array(np_ptr, shape=Python.tuple(f.size))
+
+    # print(np_f)
+
+
+
+    # f_buffer =  ctx.enqueue_create_host_buffer[grid.float_dtype](grid.f_field_size)
+    # f_out_buffer =  ctx.enqueue_create_host_buffer[grid.float_dtype](grid.f_field_size)
+
+    # flag_buffer = ctx.enqueue_create_host_buffer[DType.uint8](grid.num_points)
+    # bc_buffer = ctx.enqueue_create_host_buffer[grid.float_dtype](grid.bc_field_size)
+
+    # ctx.synchronize()
+    # # flags = TileTensor[DType.uint8,RowMajorType,MutAnyOrigin](flag_buffer,layout)
+    
+    # # Do BC on this
+    # flags = TileTensor[DType.uint8](flag_buffer,flag_layout)
+    # bc = TileTensor[float_dtype](bc_buffer,bc_layout)
+    # f = TileTensor[float_dtype](f_buffer,f_layout)
+    # Make buffers to GPU
+
+    # f_buffer_gpu =  ctx.enqueue_create_buffer[grid.float_dtype](grid.f_field_size)
+    # f_out_buffer_gpu =  ctx.enqueue_create_buffer[grid.float_dtype](grid.f_field_size)
+
+    # flag_buffer_gpu = ctx.enqueue_create_buffer[DType.uint8](grid.num_points)
+    # bc_buffer_gpu = ctx.enqueue_create_buffer[grid.float_dtype](grid.bc_field_size)
+
+    # ctx.synchronize()
+
+    # # Copy Buffers from cpu to GPU
+
+    # ctx.enqueue_copy(dst_buf = f_buffer_gpu,src_buf = f_buffer)
+    # ctx.enqueue_copy(dst_buf = f_out_buffer_gpu,src_buf = f_out_buffer)
+    # ctx.enqueue_copy(dst_buf = flag_buffer_gpu,src_buf = flag_buffer)
+    # ctx.enqueue_copy(dst_buf = bc_buffer_gpu,src_buf = bc_buffer)
+
+    # ctx.synchronize()
 

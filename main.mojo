@@ -5,8 +5,9 @@ from std.python import Python, PythonObject
 from std.gpu import block_dim, block_idx, thread_idx
 from std.math import ceildiv
 from std.collections import InlineArray
-from src.lbm import SOLID_NODE,FLUID_NODE,set_outer_walls,LBM_Grid,get_D2Q9,LBM_kernel,calculate_rho_and_velocity
+from src.lbm import SOLID_NODE,FLUID_NODE,LBM_Grid,get_D2Q9,set_outer_walls,calculate_rho_and_velocity
 from src.utils import Vector,ContextTileTensor
+from src.lbm.variations.base import LBM_kernel
 
 comptime float_dtype = DType.float32
 comptime int_dtype = DType.int32
@@ -61,11 +62,11 @@ def main() raises:
 
     f.fill(1./Float32(Q))
     f_out.fill(1./Float32(Q))
+    set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'+Y',SOLID_NODE,[U,0],1.)
+    set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'-Y',SOLID_NODE,[0,0],1.)
+    set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'-X',SOLID_NODE,[0,0],1.)
+    set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'+X',SOLID_NODE,[0,0],1.)
 
-    set_outer_walls[D,nx,ny,nz](flags.cpu(),bc.cpu(),'+Y',SOLID_NODE,[U,0],1.)
-    set_outer_walls[D,nx,ny,nz](flags.cpu(),bc.cpu(),'-Y',SOLID_NODE,[0,0],1.)
-    set_outer_walls[D,nx,ny,nz](flags.cpu(),bc.cpu(),'-X',SOLID_NODE,[0,0],1.)
-    set_outer_walls[D,nx,ny,nz](flags.cpu(),bc.cpu(),'+X',SOLID_NODE,[0,0],1.)
     ctx.synchronize()
     # Copy To GPU()
     _ = flags.gpu()

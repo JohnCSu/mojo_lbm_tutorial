@@ -47,7 +47,7 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
 
     # Main Compute
     if (index[0] < grid_shape[0]) and (index[1] < grid_shape[1]) and (index[2] < grid_shape[2]): # Basic Guard
-        var f_new = Vector[float_dtype,D](fill = 0.)
+        var f_new = Vector[float_dtype,Q](fill = 0.)
         var velocity = Vector[float_dtype,D]()
         for q in range(Q):
             f_opp = f_in[opposite_index[q],x,y,z]

@@ -59,19 +59,17 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
     block_index:InlineArray[Int,3] = [block_x,block_y,block_z]
     # Main Compute
     if (index[0] < grid_shape[0]) and (index[1] < grid_shape[1]) and (index[2] < grid_shape[2]): # Basic Guard
-        var f_new = Vector[float_dtype,D](fill = 0.)
+        var f_new = Vector[float_dtype,Q](fill = 0.)
         var velocity = Vector[float_dtype,D]()
         for q in range(Q):
-            f_opp = f_in[0,opposite_index[q],   local_x,block_x,    local_y,block_y,    local_z,block_z] # Need (local_idx,block_idx)
             direction = directions[q]
             pull_local,pull_block = get_adjacent_idx[D,Flaglayout,tile_size,-1](local_index,block_index,direction) # Pulling Scheme
-
-            pulled_f = f_in[0,q,pull_local[0],pull_block[0],     pull_local[1],pull_block[1],   pull_local[2],pull_block[2]]
             pulled_flag = flags[pull_local[0],pull_block[0],     pull_local[1],pull_block[1],   pull_local[2],pull_block[2]]
-
-            if pulled_flag == FLUID_NODE: # Stream
-                f_new[q] = pulled_f
-            elif pulled_flag == SOLID_NODE: # BounceBack with moving wall BC put together (2nd term is 0 if stationary wall)
+            
+            pulled_f = f_in[0,q,pull_local[0],pull_block[0],     pull_local[1],pull_block[1],   pull_local[2],pull_block[2]]
+            f_new[q] = pulled_f if pulled_flag == FLUID_NODE else f_new[q]
+            if pulled_flag == SOLID_NODE: # BounceBack with moving wall BC put together (2nd term is 0 if stationary wall)
+                f_opp = f_in[0,opposite_index[q],   local_x,block_x,    local_y,block_y,    local_z,block_z] # Need (local_idx,block_idx)
                 comptime for ii in range(D):
                     velocity[ii] = bc[pull_local[0],pull_block[0],     pull_local[1],pull_block[1],   pull_local[2],pull_block[2],   ii,0]
                 rho = bc[pull_local[0],pull_block[0],     pull_local[1],pull_block[1],   pull_local[2],pull_block[2],   D,0]
@@ -80,12 +78,12 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
         # Get Velocity and Density
         velocity.fill(0)
         rho = 0
-        for q in range(Q):
+        comptime for q in range(Q):
             rho += f_new[q]
             velocity += f_new[q]*float_directions[q]
         velocity /= rho
         # Collision Term
-        for q in range(Q):
+        comptime for q in range(Q):
             f_eq = SRT(weights[q],rho,velocity,float_directions[q])            
             f_out[0,q,   local_x,block_x,    local_y,block_y,    local_z,block_z] = f_new[q] -  inv_tau*(f_new[q]- f_eq)
 

@@ -7,9 +7,9 @@ from layout.tile_layout import (
     row_major,
     zipped_divide,
 )
-comptime tile = col_major[2, 2]()
+comptime tile = col_major[4,4]()
     # Define a 2x5 tiler
-comptime tiler = row_major[2, 3]()
+comptime tiler = row_major[2, 2]()
 comptime blocked = blocked_product(tile, tiler)
 comptime legacyblocked = blocked.to_layout()
 
@@ -31,6 +31,9 @@ def main() raises:
     
     leg_tensor = LayoutTensor[DType.float32,legacyblocked](tensor.ptr)
 
+
+    comptime for i in range(tensor.rank):
+        print(tensor.static_shape[1+i*2])
     # x = tensor.to_layout_tensor()
     # x = tensor.to_layout_tensor()
     print(leg_tensor[0,0])

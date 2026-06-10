@@ -7,7 +7,7 @@ from std.math import ceildiv
 
 from std.collections import InlineArray
 from src.lbm import SOLID_NODE,FLUID_NODE,LBM_Grid,get_D2Q9,set_outer_walls,calculate_rho_and_velocity
-from src.lbm.variations.tiled_test import LBM_kernel
+from src.lbm.variations.tiled_no_layout import LBM_kernel
 from src.utils import Vector,ContextTileTensor
 
 comptime float_dtype = DType.float32
@@ -23,7 +23,7 @@ comptime num_points = nx*ny*nz
 
 comptime THREADS_PER_BLOCK = 256
 comptime BLOCK_SHAPE = (16,16,1)
-comptime GRID_DIM = ((nx) // BLOCK_SHAPE[0]+1,(ny) // BLOCK_SHAPE[1]+1, 1 )# Plus one
+comptime GRID_DIM = ((nx) // BLOCK_SHAPE[0],(ny) // BLOCK_SHAPE[1], 1 )# Plus one
 comptime tile_size = 16
 comptime n_tiles = N//tile_size
 
@@ -107,6 +107,7 @@ def main() raises:
             u_np = u.buffer_to_numpy()/U
             print('step = {} max ={} avg = {}'.format(t,u_np.max(),u_np.mean()))
     ctx.synchronize()
+    # return None
     # Get Final U and rho
     ctx.enqueue_function(calc_rho_and_u_gpu,f.gpu(),rho.gpu(),u.gpu(),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
 

@@ -13,6 +13,8 @@ def calculate_rho_and_velocity[ float_dtype:DType,D:Int,Q:Int,
                                 Flayout:Layout[...] where Flayout.rank == 4,
                                 RhoLayout:Layout[...] where RhoLayout.rank == 3,
                                 VelocityLayout:Layout[...] where VelocityLayout.rank == 4,
+                                *,
+                                f_is_AoS:Bool = False
                                 ]
                                 (
                                     f:TileTensor[float_dtype,type_of(Flayout),MutAnyOrigin],
@@ -41,8 +43,12 @@ def calculate_rho_and_velocity[ float_dtype:DType,D:Int,Q:Int,
         var u = Vector[float_dtype,D](fill = 0.)
         var rho = Scalar[float_dtype](0)
         for q in range(Q):
-            rho += f_lt[q,x,y,z][0]
-            u += f_lt[q,x,y,z][0]*lattice_model.float_directions[q]
+            comptime if f_is_AoS:
+                rho += f_lt[x,y,z,q][0]
+                u += f_lt[x,y,z,q][0]*lattice_model.float_directions[q]
+            else:
+                rho += f_lt[q,x,y,z][0]
+                u += f_lt[q,x,y,z][0]*lattice_model.float_directions[q]
         u /= rho
 
         density_lt[x,y,z] = rho

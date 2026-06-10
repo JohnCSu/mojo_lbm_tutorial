@@ -97,7 +97,7 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
             f_out_lt[q,x,y,z] = f_new[q] -  inv_tau*(f_new[q]- f_eq)
 
 
-
+@always_inline
 def get_adjacent_idx[D:Int,shift:Int32 = 1](index:Vector[DType.int32,3],grid_shape:Vector[DType.int32,3],direction:Vector[DType.int32,D],) -> Vector[DType.int32,3]:
     comptime assert D <= 3 
     adj_index = Vector[DType.int32,3]()
@@ -106,120 +106,9 @@ def get_adjacent_idx[D:Int,shift:Int32 = 1](index:Vector[DType.int32,3],grid_sha
     return adj_index
 
 
+@always_inline
 def SRT[dtype:DType,D:Int,//](weight:Scalar[dtype],density:Scalar[dtype],velocity:Vector[dtype,D],direction:Vector[dtype,D]) -> Scalar[dtype]:
     comptime assert dtype.is_floating_point(), 'DType to BGK_collision term should be Float point like' # Weied using where statement cause compile error?
     ei_dot_u = velocity.dot(direction)
     return weight*density*(1 + 3.*ei_dot_u + 4.5*ei_dot_u*ei_dot_u - 1.5*velocity.dot(velocity))
 
-
-from std.collections import Set
-
-def set_outer_walls[float_dtype:DType,
-                    # BCLayoutType:TensorLayout,
-                    # FlagLayout:TensorLayout,
-                    flag_origin:Origin[mut=True],
-                    bc_origin:Origin[mut=True],
-                    //,
-                    D:Int,
-                    nx:Int,
-                    ny:Int,
-                    nz:Int,
-                    FlagLayout:Layout[_,_],
-                    BCLayout:Layout[_,_],
-                    ]
-                    (flags:TileTensor[DType.uint8,type_of(FlagLayout),flag_origin],
-                            bc:TileTensor[float_dtype,type_of(BCLayout),bc_origin],
-                            side:String,
-                            boundary_type:Scalar[DType.uint8],
-                            velocity:List[Scalar[float_dtype]],
-                            density:Scalar[float_dtype]) raises:
-
-    comptime assert float_dtype.is_floating_point()
-    comptime assert flags.rank == 3 and bc.rank == 4
-    
-    comptime flag_as_lt = LayoutTensor[DType.uint8,FlagLayout.to_layout(),flag_origin]
-    comptime bc_as_lt = LayoutTensor[float_dtype,BCLayout.to_layout(),bc_origin]
-
-    flags_lt = flag_as_lt(flags.ptr)
-    bc_lt = bc_as_lt(bc.ptr)
-
-    axes:Dict[String,Int] = {'X':0,
-                    'Y':1,
-                    'Z':2,}
-    valid_strings:Set[String] = {'-X','+X','-Y','+Y','-Z','+Z'}
-    # (side) in valid_strings
-    assert side in valid_strings, 'Must be valid string'
-    axis = axes[String(side[byte = 1])]
-    
-    # Layout independent
-    end_values = [nx,ny,nz]
-    if side[byte = 0] == '-':
-        fixed = 0
-    else:
-        fixed = end_values[axis] - 1
-
-    if axis == 0: # X-axis, fix x and loop
-        for y in range(ny):
-            for z in range(nz):
-                flags_lt[fixed,y,z] = flags.ElementType(boundary_type)
-                comptime for i in range(D):
-                    bc_lt[fixed,y,z,i] = velocity[i]
-                bc_lt[fixed,y,z,D] = density
-    elif axis == 1:
-        for x in range(nx):
-            for z in range(nz):
-                flags_lt[x,fixed,z] = flags.ElementType(boundary_type)
-                comptime for i in range(D):
-                    bc_lt[x,fixed,z,i] = velocity[i]
-                bc_lt[x,fixed,z,D] = density
-    else: # Loop Z-face
-        for x in range(nx):
-            for y in range(ny):
-                flags_lt[x,y,fixed] = flags.ElementType(boundary_type)
-                comptime for i in range(D):
-                    bc_lt[x,y,fixed,i] = velocity[i]
-                bc_lt[x,y,fixed,D] = density
-
-
-def calculate_rho_and_velocity[ float_dtype:DType,D:Int,Q:Int,
-                                lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
-                                nx:Int,ny:Int,nz:Int,
-                                //,
-                                grid: LBM_Grid[lattice_model,nx,ny,nz], 
-                                Flayout:Layout[...] where Flayout.rank == 4,
-                                RhoLayout:Layout[...] where RhoLayout.rank == 3,
-                                VelocityLayout:Layout[...] where VelocityLayout.rank == 4,
-                                ]
-                                (
-                                    f:TileTensor[float_dtype,type_of(Flayout),MutAnyOrigin],
-                                    density:TileTensor[float_dtype,type_of(RhoLayout),MutAnyOrigin],
-                                    velocity:TileTensor[float_dtype,type_of(VelocityLayout),MutAnyOrigin],
-                                ):
-    # Run on GPU
-    '''
-    Compute the Velocity and Density from f dist. Converts to layout tensor to allow layout independent assignment
-    '''
-    comptime grid_shape = Vector[DType.int32,3](Int32(nx),Int32(ny),Int32(nz))
-    comptime f_as_lt = LayoutTensor[float_dtype,Flayout.to_layout(),MutAnyOrigin]
-    comptime vel_as_lt = LayoutTensor[float_dtype,VelocityLayout.to_layout(),MutAnyOrigin]
-    comptime rho_as_lt = LayoutTensor[float_dtype,RhoLayout.to_layout(),MutAnyOrigin]
-    f_lt = f_as_lt(f.ptr)
-    velocity_lt = vel_as_lt(velocity.ptr)
-    density_lt = rho_as_lt(density.ptr)
-
-    x = block_dim.x * block_idx.x + thread_idx.x
-    y = block_dim.y * block_idx.y + thread_idx.y
-    z = block_dim.z * block_idx.z + thread_idx.z
-    index = Vector[DType.int32,3](Int32(x),Int32(y),Int32(z))
-
-    if index[0] < grid_shape[0] and index[1] < grid_shape[1] and index[2] < grid_shape[2]: # Basic Guard
-        var u = Vector[float_dtype,D](fill = 0.)
-        var rho = Scalar[float_dtype](0)
-        for q in range(Q):
-            rho += f_lt[q,x,y,z][0]
-            u += f_lt[q,x,y,z][0]*lattice_model.float_directions[q]
-        u /= rho
-
-        density_lt[x,y,z] = rho
-        comptime for i in range(D):
-            velocity_lt[i,x,y,z] = u[i]

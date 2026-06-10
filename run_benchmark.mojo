@@ -5,8 +5,9 @@ from std.python import Python, PythonObject
 from std.gpu import block_dim, block_idx, thread_idx
 from std.math import ceildiv
 from std.collections import InlineArray
-from src.lbm import SOLID_NODE,FLUID_NODE,set_outer_walls,LBM_Grid,get_D2Q9,LBM_kernel
-from src.lbm.variations import reorderThreads,tiled,base
+from src.lbm import SOLID_NODE,FLUID_NODE,set_outer_walls,LBM_Grid,get_D2Q9
+from src.lbm.variations.part_1 import reorderThreads,tiled,tiled_no_layout,branchless,immutable_inputs,loop_unroll
+from src.lbm.variations import base,tensor_loads
 
 from src.utils import Vector,ContextTileTensor
 from std.benchmark import Bench, BenchConfig, Bencher, BenchId, keep,run
@@ -45,6 +46,14 @@ comptime benchmark_3a = tiled.benchmark_func_row_tile[grid,GRID_DIM,BLOCK_SHAPE,
 comptime benchmark_3b = tiled.benchmark_func_col_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
 comptime benchmark_3c = tiled.benchmark_func_row_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size,reorder_threads = False]
 comptime benchmark_3d = tiled.benchmark_func_col_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size,reorder_threads = False]
+comptime benchmark_3e = tiled_no_layout.benchmark_func_col_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
+
+comptime benchmark_4 = loop_unroll.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
+comptime benchmark_5 = branchless.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
+comptime benchmark_6 = immutable_inputs.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
+comptime benchmark_7 = tensor_loads.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
+
+
 
 def main() raises:
     total_bytes =  Q*num_points*2*4 + num_points*(D+1)*4 + num_points # 4btes per Q (fp32) , 4 byters per bc (fp32) , 1 byte per flag (fp) 
@@ -61,10 +70,14 @@ def main() raises:
 
     bench.bench_function[benchmark_1](BenchId('Base Row Major LBM Kernel '))
     bench.bench_function[benchmark_2](BenchId('Base with Thread Reordering'))
-    bench.bench_function[benchmark_3a](BenchId('Tiled 16x16 Layout Tile:Row major Tiler: Row major'))
+    # bench.bench_function[benchmark_3a](BenchId('Tiled 16x16 Layout Tile:Row major Tiler: Row major'))
     bench.bench_function[benchmark_3b](BenchId('Tiled 16x16 Layout Tile:Col major Tiler: Row major'))
-    bench.bench_function[benchmark_3c](BenchId('Tiled 16x16 Layout Tile:Row major Tiler: Row major No Thread Reorder'))
-    bench.bench_function[benchmark_3d](BenchId('Tiled 16x16 Layout Tile:Col major Tiler: Row major No Thread Reorder'))
-
+    # bench.bench_function[benchmark_3c](BenchId('Tiled 16x16 Layout Tile:Row major Tiler: Row major No Thread Reorder'))
+    # bench.bench_function[benchmark_3d](BenchId('Tiled 16x16 Layout Tile:Col major Tiler: Row major No Thread Reorder'))
+    bench.bench_function[benchmark_3e](BenchId('Tiled 16x16 Layout Tile:Col major Tiler: Row major No Layout'))
+    bench.bench_function[benchmark_4](BenchId('Tiled 16x16 Layout Col/Row Loop Unroll'))
+    bench.bench_function[benchmark_5](BenchId('Tiled 16x16 Layout Col/Row Loop Unroll branchless'))
+    bench.bench_function[benchmark_6](BenchId('Tiled 16x16 Layout Col/Row Loop Unroll branchless Immutable'))
+    bench.bench_function[benchmark_7](BenchId('Benchmark_6 but with TileTensor.load and .store'))
 
     print(bench)

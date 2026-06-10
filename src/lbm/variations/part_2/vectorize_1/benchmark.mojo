@@ -51,7 +51,9 @@ def benchmark_func[
 
     comptime density_layout = row_major[nx,ny,nz]()
     comptime velocity_layout = row_major[D,nx,ny,nz]()
+    
 
+    comptime simd_width = 4
     ctx = DeviceContext()
     flags = ContextTileTensor[DType.uint8](ctx,flag_layout)
     bc = ContextTileTensor[float_dtype](ctx,bc_layout)
@@ -78,7 +80,8 @@ def benchmark_func[
 
     ctx.synchronize()
     #Compile Functions
-    LBM_func = ctx.compile_function[LBM_kernel[grid,f_layout,bc_layout,flag_layout,reorder_threads = reorder_threads],LBM_kernel[grid,f_layout,bc_layout,flag_layout,reorder_threads = reorder_threads]]()
+    comptime LBM_kernel_ = LBM_kernel[grid,f_layout,bc_layout,flag_layout,simd_width,reorder_threads = reorder_threads]
+    LBM_func = ctx.compile_function[LBM_kernel_,LBM_kernel_]()
     calc_rho_and_u_gpu = ctx.compile_function[calculate_rho_and_velocity[grid,f_layout,density_layout,velocity_layout],calculate_rho_and_velocity[grid,f_layout,density_layout,velocity_layout]]()
     ctx.synchronize()
     

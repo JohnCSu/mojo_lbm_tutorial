@@ -1,3 +1,5 @@
+from std.memory import UnsafePointer
+
 struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & Writable):
     '''
     Create a stack allocated vector of DType elements. Not optimised to use SIMD so you 
@@ -9,8 +11,9 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & W
         - mul and div with scalars of same DType
     '''
     # comptime dataType = InlineArray[Self.dtype,Self.size]
+    comptime dataType =InlineArray[Scalar[Self.dtype],Self.size] 
     var data:InlineArray[Scalar[Self.dtype],Self.size]
-
+    
     @always_inline
     def __init__(out self,*numbers:Scalar[Self.dtype]):
         '''
@@ -24,7 +27,7 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & W
         
         for i in range(Self.size):
             self.data[i] = numbers[i]
-        
+    
     @always_inline
     def __init__(out self,*,fill:Scalar[Self.dtype] = 0):
         self.data = InlineArray[Scalar[Self.dtype],Self.size](fill=fill)
@@ -81,12 +84,11 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & W
             out *= self[i]
         return out
     
-    # def write_to(self, mut writer: Some[Writer]):
-    #     # s:String  = '['
-    #     # for i in range(Self.size):
-    #     #     s += ' {},'.format(self[i])
-    #     # s+= ']'
-    #     writer.write('[',self.data,']')
+
+    @always_inline
+    def unsafe_ptr(self) -> UnsafePointer[Self.dataType.ElementType,origin_of(self.data)]: 
+        x = self.data.unsafe_ptr()
+        return x
 
     @always_inline
     @staticmethod

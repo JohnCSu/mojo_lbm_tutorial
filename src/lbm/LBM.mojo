@@ -144,6 +144,9 @@ def set_outer_walls[float_dtype:DType,
     comptime flag_as_lt = LayoutTensor[DType.uint8,FlagLayout.to_layout(),flag_origin]
     comptime bc_as_lt = LayoutTensor[float_dtype,BCLayout.to_layout(),bc_origin]
 
+    if len(velocity) != D:
+        raise Error('Input velocity list was of length {} but Grid is {} Dimensional'.format(len(velocity),D))
+
     flags_lt = flag_as_lt(flags.ptr)
     bc_lt = bc_as_lt(bc.ptr)
 
@@ -161,7 +164,7 @@ def set_outer_walls[float_dtype:DType,
         fixed = 0
     else:
         fixed = end_values[axis] - 1
-
+    
     if axis == 0: # X-axis, fix x and loop
         for y in range(ny):
             for z in range(nz):

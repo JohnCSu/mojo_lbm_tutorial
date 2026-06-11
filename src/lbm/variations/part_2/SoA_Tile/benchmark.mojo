@@ -38,11 +38,11 @@ def benchmark_func[
     # This can be stored in LBM Grid
     
     comptime flag_tile = col_major[tile_size,tile_size,1]()
-    comptime f_tile = col_major[1,tile_size,tile_size,1]()
+    comptime f_tile = col_major[Q,tile_size,tile_size,1]()
     comptime bc_tile = col_major[tile_size,tile_size,1,D+1]()
         
     comptime flag_tiler = row_major[n_tiles,n_tiles,1]()
-    comptime f_tiler = row_major[Q,n_tiles,n_tiles,1]()
+    comptime f_tiler = row_major[1,n_tiles,n_tiles,1]()
     comptime bc_tiler = row_major[n_tiles,n_tiles,1,D+1]()
 
     comptime flag_layout = blocked_product(flag_tile,flag_tiler)

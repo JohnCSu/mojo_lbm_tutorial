@@ -62,6 +62,15 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
     
     index:InlineArray[Int,3] = [x,y,z]
 
+    # We are Row Major for tiler
+    block_x,block_dim_x = block_idx.y,block_dim.y
+    block_y,block_dim_y = block_idx.x,block_dim.x
+    block_z = 0
+
+    # We are Col Major for tiles
+    local_x = thread_idx.y
+    local_y = thread_idx.x
+    local_z = 0
     # Main Compute
     if (index[0] < grid_shape[0]) and (index[1] < grid_shape[1]) and (index[2] < grid_shape[2]): # Basic Guard
         var f_new = Vector[float_dtype,Q](fill = 0.)
@@ -73,7 +82,6 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
         
         flags.prefetch(Coord(coord_x,coord_y,coord_z))
         
-
         comptime for q in range(Q):
             direction = directions[q]
             pull_index = get_adjacent_idx[D,-1](index,grid_shape,direction) # Pulling Scheme

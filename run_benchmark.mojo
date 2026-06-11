@@ -56,8 +56,9 @@ comptime benchmark_8 = tiled_no_layout.benchmark_func_col_tile[grid,GRID_DIM,BLO
 comptime benchmark_9 = prefetch.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
 comptime benchmark_8b = tiled_no_layout_immut.benchmark_func_col_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
 comptime benchmark_10 = SoA_Tile.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
+comptime benchmark_10b = SoA_Tile.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size,reorder_threads = False]
 comptime benchmark_11 = AoS_Tile.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
-
+comptime benchmark_11b = AoS_Tile.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size,reorder_threads = False]
 def main() raises:
     total_bytes =  Q*num_points*2*4 + num_points*(D+1)*4 + num_points # 4btes per Q (fp32) , 4 byters per bc (fp32) , 1 byte per flag (fp) 
     print('Benchmark for fp32/fp32 LBM')
@@ -70,7 +71,6 @@ def main() raises:
 
     var bench_config = BenchConfig(max_iters=20, num_warmup_iters=1)
     var bench = Bench(bench_config.copy())
-
 
     print('Base Unoptimized Layout Changes ')
     bench.bench_function[benchmark_1](BenchId('1. Base Row Major LBM Kernel '))
@@ -93,7 +93,9 @@ def main() raises:
     bench.bench_function[benchmark_8](BenchId('8. Tiled 16x16 Layout Tile:Col major Tiler: Row major Nested Indexing'))
     bench.bench_function[benchmark_8b](BenchId('8b. Tiled 16x16 Layout Tile:Col major Tiler: Row major Nested Indexing With Immut Inputs'))
     bench.bench_function[benchmark_9](BenchId('9. Benchmark 8 with Prefetching flags and BC'))
-    bench.bench_function[benchmark_10](BenchId('10. SoA Tile'))
-    bench.bench_function[benchmark_11](BenchId('11. AoS Tile'))
+    bench.bench_function[benchmark_10](BenchId('10. Col Major SoA Tile Thread Reordering'))
+    bench.bench_function[benchmark_10b](BenchId('10b. Col Major SoA Tile No Reordering'))
+    bench.bench_function[benchmark_11](BenchId('11. Col Major AoS Tile Thread Reordering'))
+    bench.bench_function[benchmark_11b](BenchId('11b. Col Major AoS Tile No Reordering'))
     
     print(bench)

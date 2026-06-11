@@ -31,9 +31,13 @@ struct LatticeModel[D:Int,Q:Int,float_dtype:DType,int_dtype:DType](ImplicitlyCop
                     break
 
 
-def get_D3Q19[float_dtype:DType = DType.float32,int_dtype:DType = DType.int32]() -> LatticeModel[2,9,float_dtype,int_dtype]:  
-    comptime D = 2
-    comptime Q = 9
+
+
+
+
+def get_D3Q19[float_dtype:DType = DType.float32,int_dtype:DType = DType.int32]() -> LatticeModel[3,19,float_dtype,int_dtype]:  
+    comptime D = 3
+    comptime Q = 19
     comptime int_vector = Vector[int_dtype,D]
     comptime float_vector = Vector[float_dtype,D]
     
@@ -59,10 +63,12 @@ def get_D3Q19[float_dtype:DType = DType.float32,int_dtype:DType = DType.int32]()
         directions[i].fill_and_cast_from_list(directions_list[i])
 
     weights =  Vector[float_dtype,Q](
-                                    4./9.,                          # 0: Center
-                                    1./9., 1./9., 1./9., 1./9.,           # 1-4: Axis
-                                    1./36., 1/36., 1./36., 1./36.        # 5-8: Diagonal
-                                    )
+                        # Center
+                        1./3,
+                        # Faces
+                        1./18, 1./18, 1//18, 1./18, 1./18, 1./18,
+                        # Edges
+                        1./36, 1./36, 1./36, 1./36, 1./36, 1./36, 1./36, 1./36, 1./36, 1./36, 1./36, 1./36)
 
     return LatticeModel[D,Q,float_dtype,int_dtype](directions,float_directions,weights)
     

@@ -6,6 +6,9 @@ from .lattice_models import LatticeModel
 from src.utils import Vector,ContextTileTensor
 
 
+
+
+
 def calculate_rho_and_velocity[ float_dtype:DType,D:Int,Q:Int,
                                 lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
                                 nx:Int,ny:Int,nz:Int,
@@ -14,8 +17,6 @@ def calculate_rho_and_velocity[ float_dtype:DType,D:Int,Q:Int,
                                 Flayout:Layout[...] where Flayout.rank == 4,
                                 RhoLayout:Layout[...] where RhoLayout.rank == 3,
                                 VelocityLayout:Layout[...] where VelocityLayout.rank == 4,
-                                *,
-                                f_is_AoS:Bool = False
                                 ]
                                 (
                                     f:TileTensor[float_dtype,type_of(Flayout),MutAnyOrigin],
@@ -31,6 +32,8 @@ def calculate_rho_and_velocity[ float_dtype:DType,D:Int,Q:Int,
     comptime f_as_lt = LayoutTensor[float_dtype,Flayout.to_layout(),MutAnyOrigin]
     comptime vel_as_lt = LayoutTensor[float_dtype,VelocityLayout.to_layout(),MutAnyOrigin]
     comptime rho_as_lt = LayoutTensor[float_dtype,RhoLayout.to_layout(),MutAnyOrigin]
+
+    comptime f_is_first_index = (f_as_lt.shape[0]() == Q and f_as_lt.shape[1]() == nx and f_as_lt.shape[2]() == ny and f_as_lt.shape[3]() == nz)
     f_lt = f_as_lt(f.ptr)
     velocity_lt = vel_as_lt(velocity.ptr)
     density_lt = rho_as_lt(density.ptr)
@@ -44,12 +47,12 @@ def calculate_rho_and_velocity[ float_dtype:DType,D:Int,Q:Int,
         var u = Vector[float_dtype,D](fill = 0.)
         var rho = Scalar[float_dtype](0)
         for q in range(Q):
-            comptime if f_is_AoS:
-                rho += f_lt[x,y,z,q][0]
-                u += f_lt[x,y,z,q][0]*lattice_model.float_directions[q]
-            else:
+            comptime if f_is_first_index:
                 rho += f_lt[q,x,y,z][0]
                 u += f_lt[q,x,y,z][0]*lattice_model.float_directions[q]
+            else:
+                rho += f_lt[x,y,z,q][0]
+                u += f_lt[x,y,z,q][0]*lattice_model.float_directions[q]
         u /= rho
 
         density_lt[x,y,z] = rho

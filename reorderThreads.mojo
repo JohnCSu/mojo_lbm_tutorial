@@ -7,7 +7,7 @@ from std.math import ceildiv
 from std.collections import InlineArray
 from src.lbm import SOLID_NODE,FLUID_NODE,LBM_Grid,get_D2Q9,set_outer_walls,calculate_rho_and_velocity
 from src.utils import Vector,ContextTileTensor
-from src.lbm.variations.reorderThreads import LBM_kernel
+from src.lbm.variations.part_1.reorderThreads import LBM_kernel
 
 comptime float_dtype = DType.float32
 comptime int_dtype = DType.int32
@@ -20,18 +20,18 @@ comptime dx = L/float_scalar(N-1)
 comptime (nx,ny,nz) = (N,N,1)
 comptime num_points = nx*ny*nz
 
-comptime THREADS_PER_BLOCK = 64
-comptime BLOCK_SHAPE = (8,8,1)
-comptime GRID_DIM = ((nx) // BLOCK_SHAPE[0]+1,(ny) // BLOCK_SHAPE[1]+1, 1 )# Plus one
+comptime tile_size = 1
+comptime grid = LBM_Grid[D2Q9,nx,ny,nz,tile_size](dx)
 
-# This can be stored in LBM Grid
+comptime BLOCK_SHAPE = grid.BLOCK_SHAPE
+comptime GRID_DIM = grid.GRID_DIM
+
 comptime flag_layout = row_major[nx,ny,nz]()
 comptime f_layout = row_major[Q,nx,ny,nz]()
 comptime bc_layout = row_major[nx,ny,nz,D+1]()
 comptime density_layout = row_major[nx,ny,nz]()
 comptime velocity_layout = row_major[D,nx,ny,nz]()
 
-comptime grid = LBM_Grid[D2Q9,nx,ny,nz](dx)
 comptime all_slice = slice(None,None,None)
 
 def main() raises:

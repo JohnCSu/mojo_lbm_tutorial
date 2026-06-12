@@ -21,19 +21,19 @@ comptime dx = L/float_scalar(N-1)
 comptime (nx,ny,nz) = (N,N,1)
 comptime num_points = nx*ny*nz
 
-comptime THREADS_PER_BLOCK = 256
-comptime BLOCK_SHAPE = (16,16,1)
-comptime GRID_DIM = ((nx) // BLOCK_SHAPE[0]+1,(ny) // BLOCK_SHAPE[1]+1, 1 )# Plus one
 comptime tile_size = 16
-comptime n_tiles = N//tile_size
+comptime grid = LBM_Grid[D2Q9,nx,ny,nz,tile_size](dx)
+
+comptime BLOCK_SHAPE = grid.BLOCK_SHAPE
+comptime GRID_DIM = grid.GRID_DIM
 comptime simd_width = 4
 comptime flag_tile = col_major[tile_size,tile_size,1]()
 comptime f_tile = col_major[tile_size,tile_size,1,Q]()
 comptime bc_tile = col_major[tile_size,tile_size,1,D+1]()
-    
-comptime flag_tiler = row_major[n_tiles,n_tiles,1]()
-comptime f_tiler = row_major[n_tiles,n_tiles,1,1]()
-comptime bc_tiler = row_major[n_tiles,n_tiles,1,1]()
+
+comptime flag_tiler = row_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z]()
+comptime f_tiler = row_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z,1]()
+comptime bc_tiler = row_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z,1]()
 
 comptime flag_layout = blocked_product(flag_tile,flag_tiler)
 comptime f_layout = blocked_product(f_tile,f_tiler)
@@ -42,7 +42,6 @@ comptime bc_layout = blocked_product(bc_tile,bc_tiler)
 comptime density_layout = row_major[nx,ny,nz]()
 comptime velocity_layout = row_major[D,nx,ny,nz]()
 
-comptime grid = LBM_Grid[D2Q9,nx,ny,nz](dx)
 comptime all_slice = slice(None,None,None)
 
 def main() raises:

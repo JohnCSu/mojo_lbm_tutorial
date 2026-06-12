@@ -24,12 +24,11 @@ comptime dx = L/float_scalar(N-1)
 comptime (nx,ny,nz) = (N,N,1)
 comptime num_points = nx*ny*nz
 
-comptime THREADS_PER_BLOCK = 256
 comptime tile_size = 16
-comptime BLOCK_SHAPE = (16,16,1)
-comptime GRID_DIM = ((nx) // BLOCK_SHAPE[0],(ny) // BLOCK_SHAPE[1], 1 )# Plus one
+comptime grid = LBM_Grid[D2Q9,nx,ny,nz,tile_size](dx)
 
-comptime grid = LBM_Grid[D2Q9,nx,ny,nz](dx)
+comptime BLOCK_SHAPE = grid.BLOCK_SHAPE
+comptime GRID_DIM = grid.GRID_DIM
 
 comptime U_phs:float_scalar = 1.
 comptime U:float_scalar = 0.05
@@ -43,22 +42,24 @@ comptime tau = v_lat/(1/3.) +0.5
 
 comptime benchmark_1 = base.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau]
 comptime benchmark_2 = reorderThreads.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau]
-comptime benchmark_3a = tiled.benchmark_func_row_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
-comptime benchmark_3b = tiled.benchmark_func_col_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
-comptime benchmark_3c = tiled.benchmark_func_row_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size,reorder_threads = False]
-comptime benchmark_3d = tiled.benchmark_func_col_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size,reorder_threads = False]
-comptime benchmark_4 = loop_unroll.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
-comptime benchmark_5 = branchless.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
-comptime benchmark_6 = immutable_inputs.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
+comptime benchmark_3a = tiled.benchmark_func_row_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau]
+comptime benchmark_3b = tiled.benchmark_func_col_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau]
+comptime benchmark_3c = tiled.benchmark_func_row_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau,reorder_threads = False]
+comptime benchmark_3d = tiled.benchmark_func_col_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau,reorder_threads = False]
+comptime benchmark_4 = loop_unroll.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau]
+comptime benchmark_5 = branchless.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau]
+comptime benchmark_6 = immutable_inputs.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau]
 
-comptime benchmark_7 = tensor_loads.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
-comptime benchmark_8 = tiled_no_layout.benchmark_func_col_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
-comptime benchmark_9 = prefetch.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
-comptime benchmark_8b = tiled_no_layout_immut.benchmark_func_col_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
-comptime benchmark_10 = SoA_Tile.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
-comptime benchmark_10b = SoA_Tile.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size,reorder_threads = False]
-comptime benchmark_11 = AoS_Tile.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size]
-comptime benchmark_11b = AoS_Tile.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,tile_size,reorder_threads = False]
+comptime benchmark_7 = tensor_loads.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau]
+comptime benchmark_8 = tiled_no_layout.benchmark_func_col_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau]
+comptime benchmark_9 = prefetch.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau]
+comptime benchmark_8b = tiled_no_layout_immut.benchmark_func_col_tile[grid,GRID_DIM,BLOCK_SHAPE,U,tau]
+comptime benchmark_10 = SoA_Tile.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau]
+comptime benchmark_10b = SoA_Tile.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,reorder_threads = False]
+comptime benchmark_11 = AoS_Tile.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau]
+comptime benchmark_11b = AoS_Tile.benchmark_func[grid,GRID_DIM,BLOCK_SHAPE,U,tau,reorder_threads = False]
+
+
 def main() raises:
     total_bytes =  Q*num_points*2*4 + num_points*(D+1)*4 + num_points # 4btes per Q (fp32) , 4 byters per bc (fp32) , 1 byte per flag (fp) 
     print('Benchmark for fp32/fp32 LBM')

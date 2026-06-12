@@ -6,34 +6,36 @@ from std.gpu import block_dim, block_idx, thread_idx
 from std.math import ceildiv
 
 from std.collections import InlineArray
-from src.lbm import SOLID_NODE,FLUID_NODE,LBM_Grid,get_D2Q9,set_outer_walls,calculate_rho_and_velocity
+from src.lbm import SOLID_NODE,FLUID_NODE,LBM_Grid,set_outer_walls,calculate_rho_and_velocity
+from src.lbm.lattice_models import get_D3Q19
+
 from src.lbm.variations.part_2.SoA_Tile import LBM_kernel
 from src.utils import Vector,ContextTileTensor
-
+from src.lbm.moments import copy_4D_to_rowMajor_layout
 comptime float_dtype = DType.float32
 comptime int_dtype = DType.int32
 comptime float_scalar = Scalar[float_dtype]
-comptime D2Q9 = get_D2Q9[DType.float32,DType.int32]()
-comptime D,Q = (2,9)
-comptime N = 128
+comptime D3Q19 = get_D3Q19[DType.float32,DType.int32]()
+comptime D,Q = (D3Q19.D,D3Q19.Q)
+comptime N = 64
 comptime L = 1.
 comptime dx = L/float_scalar(N-1)
-comptime (nx,ny,nz) = (N,N,1)
+comptime (nx,ny,nz) = (2*N,N,N)
 comptime num_points = nx*ny*nz
+comptime tile_size = 1
+comptime grid = LBM_Grid[D3Q19,nx,ny,nz,tile_size](dx)
+comptime all_slice = slice(None,None,None)
 
-comptime THREADS_PER_BLOCK = 256
-comptime BLOCK_SHAPE = (16,16,1)
-comptime GRID_DIM = ((nx) // BLOCK_SHAPE[0]+1,(ny) // BLOCK_SHAPE[1]+1, 1 )# Plus one
-comptime tile_size = 16
-comptime n_tiles = N//tile_size
+comptime BLOCK_SHAPE = grid.BLOCK_SHAPE
+comptime GRID_DIM = grid.GRID_DIM
 comptime simd_width = 4
 comptime flag_tile = col_major[tile_size,tile_size,1]()
 comptime f_tile = col_major[tile_size,tile_size,1,Q]()
 comptime bc_tile = col_major[tile_size,tile_size,1,D+1]()
     
-comptime flag_tiler = row_major[n_tiles,n_tiles,1]()
-comptime f_tiler = row_major[n_tiles,n_tiles,1,1]()
-comptime bc_tiler = row_major[n_tiles,n_tiles,1,1]()
+comptime flag_tiler = row_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z]()
+comptime f_tiler = row_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z,1]()
+comptime bc_tiler = row_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z,1]()
 
 comptime flag_layout = blocked_product(flag_tile,flag_tiler)
 comptime f_layout = blocked_product(f_tile,f_tiler)
@@ -41,9 +43,9 @@ comptime bc_layout = blocked_product(bc_tile,bc_tiler)
 
 comptime density_layout = row_major[nx,ny,nz]()
 comptime velocity_layout = row_major[D,nx,ny,nz]()
+comptime bc_row_major = row_major[nx,ny,nz,D+1]()
 
-comptime grid = LBM_Grid[D2Q9,nx,ny,nz](dx)
-comptime all_slice = slice(None,None,None)
+
 
 def main() raises:
     comptime assert N % tile_size == 0 , 'tile_size must divide N'
@@ -60,7 +62,7 @@ def main() raises:
     v_lat = U*L_lat/Re
     tau = v_lat/(1/3.) +0.5
     print('Tau {}'.format(tau))
-
+    print(D3Q19.opposite_indices)
     ctx = DeviceContext()
     
     flags = ContextTileTensor[DType.uint8](ctx,flag_layout)
@@ -76,11 +78,11 @@ def main() raises:
     f.fill(1./Float32(Q))
     f_out.fill(1./Float32(Q))
 
-    set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'+Y',SOLID_NODE,[U,0],1.)
-    set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'-Y',SOLID_NODE,[0,0],1.)
-    set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'-X',SOLID_NODE,[0,0],1.)
-    set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'+X',SOLID_NODE,[0,0],1.)
-
+    set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'+Y',SOLID_NODE,[U,0,0],1.)
+    set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'-Y',SOLID_NODE,[0,0,0],1.)
+    set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'+X',SOLID_NODE,[0,0,0],1.)
+    set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'-X',SOLID_NODE,[0,0,0],1.)
+    
     ctx.synchronize()
     # Copy To GPU()
     _ = flags.gpu()
@@ -93,13 +95,13 @@ def main() raises:
     comptime LBM_ = LBM_kernel[grid,f_layout,bc_layout,flag_layout,simd_width]
     LBM_func = ctx.compile_function[LBM_,LBM_]()
 
-    comptime get_u_and_rho = calculate_rho_and_velocity[grid,f_layout,density_layout,velocity_layout,f_is_AoS = True]
+    comptime get_u_and_rho = calculate_rho_and_velocity[grid,f_layout,density_layout,velocity_layout]
     calc_rho_and_u_gpu = ctx.compile_function[get_u_and_rho,get_u_and_rho]()
  
     ctx.synchronize()
-
+    
     # Run Simulation
-    for t in range(10_000):
+    for t in range(10000):
         ctx.enqueue_function(LBM_func,f_out.gpu(),f.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),1/tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
         ctx.enqueue_function(LBM_func,f.gpu(),f_out.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),1/tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
         if t % 1000 == 0 :
@@ -108,7 +110,7 @@ def main() raises:
             ctx.enqueue_function(calc_rho_and_u_gpu,f.gpu(),rho.gpu(),u.gpu(),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
             ctx.synchronize()
             u_np = u.buffer_to_numpy()/U
-            print('step = {} max ={} avg = {}'.format(t,u_np.max(),u_np.mean()))
+            print('step = {} max ={} avg = {}'.format(t,u_np.max(),u_np.mean()),u_np.min())
     ctx.synchronize()
     # Get Final U and rho
     ctx.enqueue_function(calc_rho_and_u_gpu,f.gpu(),rho.gpu(),u.gpu(),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
@@ -121,30 +123,45 @@ def main() raises:
     plt = Python.import_module('matplotlib.pyplot')
     ctypes = Python.import_module("ctypes")
 
+
+    bc_row = ContextTileTensor[float_dtype](ctx,bc_row_major)
+
+    copy_4D_to_rowMajor_layout(bc.cpu(),bc_row.cpu())
+
     u_np = (u.buffer_to_numpy()/U).reshape(D,nx,ny,nz)
-    print('step = {} max ={} avg = {}'.format(0,u_np.max(),u_np.mean()) )
+    bc_np = (bc_row.buffer_to_numpy()/U).reshape(nx,ny,nz,D+1)
 
-    x = np.linspace(0, 1, nx)
-    y = np.linspace(0, 1, ny)
-    m = np.meshgrid(x, y)
-    xx,yy = m[0],m[1]
-    pv_mesh = pv.StructuredGrid(xx, yy, np.zeros_like(xx))
-    
-    
 
-    u_plot = u_np[0,all_slice,all_slice,all_slice]
-    v_plot = u_np[1,all_slice,all_slice,all_slice]
+    print(u_np.shape)
 
-    u_mag = np.sqrt(u_plot**2 + v_plot**2)
+    x = np.linspace(0, grid.domain_size[0], nx)
+    y = np.linspace(0, grid.domain_size[1], ny)
+    z = np.linspace(0, grid.domain_size[2], nz)
+    m = np.meshgrid(x, y, z,indexing = 'ij')
+    xx,yy,zz = m[0],m[1],m[2]
+    pv_mesh = pv.StructuredGrid(xx, yy, zz)
+    print(pv_mesh)
+    u_plot = u_np[0,all_slice,all_slice,all_slice].T
+    v_plot = u_np[1,all_slice,all_slice,all_slice].T
+    w_plot = u_np[2,all_slice,all_slice,all_slice].T
+
+    u_mag = np.sqrt(u_plot**2 + v_plot**2 + w_plot**2)
+    print(u_mag.shape)
     pv_mesh.point_data['U_mag'] = u_mag.ravel()
     pv_mesh.point_data['U velocity'] = u_plot.ravel()
     pv_mesh.point_data['V velocity'] = v_plot.ravel()
-    
+    pv_mesh.point_data['u bc'] = bc_np[all_slice,all_slice,all_slice,0].T.ravel()
     plotter = pv.Plotter()
     plotter.add_mesh(pv_mesh,scalars ='U_mag',show_edges = False, cmap= 'jet',clim = [0,1],nan_color='white',)
     plotter.view_xy()
+    plotter.show_axes()
     plotter.show() # screenshot = 'LDC_Re100.png'
-   
+    
+    plotter = pv.Plotter()
+    plotter.add_mesh(pv_mesh,scalars ='u bc',show_edges = False, cmap= 'jet',clim = [0,1],nan_color='white',)
+    plotter.view_xy()
+    plotter.show_axes()
+    plotter.show() # screenshot = 'LDC_Re100.png'
     
     # import pandas as pd
     v_benchmark = pd.read_csv('v_velocity_results.csv',sep = ',')

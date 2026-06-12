@@ -9,7 +9,8 @@ from std.collections import InlineArray
 from src.lbm import SOLID_NODE,FLUID_NODE,LBM_Grid,set_outer_walls,calculate_rho_and_velocity
 from src.lbm.lattice_models import get_D3Q19
 
-from src.lbm.variations.part_2.SoA_Tile import LBM_kernel
+from src.lbm.variations.part_3.base import LBM_kernel
+
 from src.utils import Vector,ContextTileTensor
 from src.lbm.moments import copy_4D_to_rowMajor_layout
 comptime float_dtype = DType.float32
@@ -20,32 +21,32 @@ comptime D,Q = (D3Q19.D,D3Q19.Q)
 comptime N = 64
 comptime L = 1.
 comptime dx = L/float_scalar(N-1)
-comptime (nx,ny,nz) = (2*N,N,N)
+comptime (nx,ny,nz) = (N,N,N)
 comptime num_points = nx*ny*nz
-comptime tile_size = 1
+comptime tile_size = 8
 comptime grid = LBM_Grid[D3Q19,nx,ny,nz,tile_size](dx)
 comptime all_slice = slice(None,None,None)
 
 comptime BLOCK_SHAPE = grid.BLOCK_SHAPE
 comptime GRID_DIM = grid.GRID_DIM
 comptime simd_width = 4
-comptime flag_tile = col_major[tile_size,tile_size,1]()
-comptime f_tile = col_major[tile_size,tile_size,1,Q]()
-comptime bc_tile = col_major[tile_size,tile_size,1,D+1]()
+
+comptime flag_tile = col_major[tile_size,tile_size,tile_size]()
+comptime f_tile = col_major[tile_size,tile_size,tile_size,Q]()
+comptime bc_tile = col_major[tile_size,tile_size,tile_size,D+1]()
     
-comptime flag_tiler = row_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z]()
-comptime f_tiler = row_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z,1]()
-comptime bc_tiler = row_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z,1]()
+comptime flag_tiler = col_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z]()
+comptime f_tiler = col_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z,1]()
+comptime bc_tiler = col_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z,1]()
 
 comptime flag_layout = blocked_product(flag_tile,flag_tiler)
 comptime f_layout = blocked_product(f_tile,f_tiler)
 comptime bc_layout = blocked_product(bc_tile,bc_tiler)
 
+
 comptime density_layout = row_major[nx,ny,nz]()
 comptime velocity_layout = row_major[D,nx,ny,nz]()
 comptime bc_row_major = row_major[nx,ny,nz,D+1]()
-
-
 
 def main() raises:
     comptime assert N % tile_size == 0 , 'tile_size must divide N'
@@ -153,12 +154,6 @@ def main() raises:
     pv_mesh.point_data['u bc'] = bc_np[all_slice,all_slice,all_slice,0].T.ravel()
     plotter = pv.Plotter()
     plotter.add_mesh(pv_mesh,scalars ='U_mag',show_edges = False, cmap= 'jet',clim = [0,1],nan_color='white',)
-    plotter.view_xy()
-    plotter.show_axes()
-    plotter.show() # screenshot = 'LDC_Re100.png'
-    
-    plotter = pv.Plotter()
-    plotter.add_mesh(pv_mesh,scalars ='u bc',show_edges = False, cmap= 'jet',clim = [0,1],nan_color='white',)
     plotter.view_xy()
     plotter.show_axes()
     plotter.show() # screenshot = 'LDC_Re100.png'

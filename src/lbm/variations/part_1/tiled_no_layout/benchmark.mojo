@@ -18,12 +18,11 @@ def benchmark_func_row_tile[
     lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
     nx:Int,ny:Int,nz:Int,
     //,
-    grid: LBM_Grid[lattice_model,nx,ny,nz],
+    grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size],
     GRID_DIM:Tuple[Int,Int,Int],
     BLOCK_SHAPE:Tuple[Int,Int,Int],
     U:Scalar[float_dtype],
     tau:Scalar[float_dtype],
-    tile_size:Int,
     *,
     reorder_threads:Bool = True
     ]
@@ -97,13 +96,13 @@ def benchmark_func_col_tile[
     float_dtype:DType,D:Int,Q:Int,
     lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
     nx:Int,ny:Int,nz:Int,
+    tile_size:Int,
     //,
-    grid: LBM_Grid[lattice_model,nx,ny,nz],
+    grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size],
     GRID_DIM:Tuple[Int,Int,Int],
     BLOCK_SHAPE:Tuple[Int,Int,Int],
     U:Scalar[float_dtype],
     tau:Scalar[float_dtype],
-    tile_size:Int,
     *,
     reorder_threads:Bool = True
     ]

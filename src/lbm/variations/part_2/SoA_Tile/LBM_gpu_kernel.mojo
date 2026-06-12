@@ -13,9 +13,9 @@ from std.sys import simd_width_of
 
 def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
                 lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
-                nx:Int,ny:Int,nz:Int,
+                nx:Int,ny:Int,nz:Int,tile_size:Int,
                 //,
-                grid: LBM_Grid[lattice_model,nx,ny,nz], 
+                grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size], 
                 Flayout:Layout[...] where Flayout.rank == 4,  
                 BClayout:Layout[...] where BClayout.rank == 4,
                 Flaglayout:Layout[...] where Flaglayout.rank == 3,
@@ -34,7 +34,8 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
     From part_1/tiled. Default layout should be Col_major Tile and ORw major tiler. Uses Compile time unrolling for last 2 for loops. Main Stream/BC comptime looping does not work.
     ''' 
     # Convience Variable Names and constants
-    comptime assert Flayout.flat_rank == 8 and BClayout.flat_rank == 8 and Flaglayout.flat_rank == 6
+    comptime assert Flaglayout.flat_rank == 6
+    comptime assert Flayout.rank == 4 and BClayout.rank == 4 and Flaglayout.rank == 3
     comptime assert Flayout.static_shape[6] == Q
     comptime weights = lattice_model.weights
     comptime float_directions = lattice_model.float_directions
@@ -100,7 +101,9 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
             pull_index = get_adjacent_idx[D,-1](index,grid_shape,direction) # Pulling Scheme
             pulled_f = f_in.load(coord[DType.uint32]((pull_index[0],pull_index[1],pull_index[2],q)))[0]
             pulled_flag = flags.load(coord[DType.uint32]((pull_index[0],pull_index[1],pull_index[2])))[0]
+            
             f_new[q] = pulled_f if pulled_flag == FLUID_NODE else f_new[q]
+
             if pulled_flag == SOLID_NODE:
                 f_opp = f_in.load(coord[DType.uint32]((x,y,z,Int(opposite_index[q]))))[0] # Need this as  Element Type is a Simd Vec of size 1
                 comptime for ii in range(D):
@@ -111,13 +114,6 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
         # Get Velocity and Density
         velocity.fill(0)
         rho = 0
-        # @always_inline
-        # def vector_sum[width:Int](i:Int) {mut f_new, mut rho, read x,read y}:
-        #     f_ptr = f_new.data.unsafe_ptr()
-        #     if i  <= len(f_new): # Ensure the load is within bounds
-        #         rho += f_ptr.load[width](i).reduce_add()
-
-        # vectorize[simd_width](len(f_new),vector_sum)
         comptime for q in range(Q):    
             rho += f_new[q]
             velocity += f_new[q]*float_directions[q]

@@ -66,9 +66,9 @@ def get_D3Q19[float_dtype:DType = DType.float32,int_dtype:DType = DType.int32]()
                         # Center
                         1./3,
                         # Faces
-                        1./18, 1./18, 1//18, 1./18, 1./18, 1./18,
+                        1./18., 1./18., 1/18., 1./18., 1./18., 1./18.,
                         # Edges
-                        1./36, 1./36, 1./36, 1./36, 1./36, 1./36, 1./36, 1./36, 1./36, 1./36, 1./36, 1./36)
+                        1./36., 1./36., 1./36., 1./36., 1./36., 1./36., 1./36., 1./36., 1./36., 1./36., 1./36., 1./36.)
 
     return LatticeModel[D,Q,float_dtype,int_dtype](directions,float_directions,weights)
     

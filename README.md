@@ -1,5 +1,7 @@
 # MOJO-LBM-Tutorial
 
+Implementation and analysis of LBM on GPU using Mojo Programming Language
+
 <table>
   <tr>
     <td align="center"><img src="images/LDC_Re100.png" width="300"></td>
@@ -13,25 +15,15 @@
   </tr>
 </table>
 
+## Features
+1. Single SRT Kernel for all dimensions leveraging mojo metaprogramming
+2. Layout independent kernel so works for row/col major arrays and tiled arrays (e.g. a row major tile embedded in a col major tiler) using natual indexing. Tile size can be adjusted
+3. Leverages only the mojo std library for setup and solver (leverages python for visualisation)
+4. For FP32/FP32 256^3 cube ~ 2000 MLUPs for D3Q19 on RTX 2070 Super
 
-A basic implementation for 2D D2Q9 LBM for Mojo using only the Standard Library as a learning exercise. If you are interested in simulation
-(and coming from python) this is a great exercise as it:
-
-1. Learning Correct Typing and Parameterization in Mojo
-    a. Supports any DType Floating point (mainly fp32 or fp64)
-2. GPU kernels and TileTensor Layouts
-3. How to call Python Modules in Mojo:
-    a. Passing buffers into Numpy arrays with Unsafe Pointers
-    b. Using Pyvista for Visualisation
-4. Creating Custom structs and functions to reduce repeated code (e.g. vector, contextTileTensor)
-5. Basic Origin tracking
-6. Mojo Packaging
-
-## Timeline
-2026/06/05 Implemented TiledLayouts for LBM
-2026/06/04 Implemeted First Variation that uses thread reording
-2026/05/20 LBM working with mid-gridbounce bounceback and moving wall BC. Row Major. Base Example
-
+## Limitations
+1. Single GPU Only for now
+2. Only Bounceback BC and bounceback with applied velocity availiable
 
 ## LBM
 Lattice Boltzmann Method (LBM) is a fluid simulation based on the Boltzmann Equation and specifically made for GPU like compute. It is an explicit time stepping algorithim (so no solving systems of equations) and performed on a structured grid. The Single relaxation time (SRT) model implemented is designed for incompressible flow (Mach number less than 0.3)
@@ -43,6 +35,32 @@ Its simplicity allows one to capture fluid motion in a single tight kernel ~ 50 
 2. Calculate Post BC and streamed velocity and density 
 3. Compute Collision Step
 
+## D3Q19 Benchmark LDC Cube 256^3
+
+``` bash
+Benchmark for fp32/fp32 LBM
+Grid Shape: 256,256,256
+Num Points On grid: 16,777,216
+
+Non Tiled Grid Dim: (32, 32, 32) Block_Shape (8, 8, 8) 
+Tiled Grid Dim: (32, 32, 32) Block_Shape (8, 8, 8) 
+
+| name                   | met (ms)           | iters |
+| ---------------------- | ------------------ | ----- |
+| 1. Base Row Major AoS  | 34.4334289         | 10    |
+| 2. Base Col Major SoA  | 12.689794899999999 | 10    |
+| 3. Tile Col, Tiler Row | 8.7517341          | 10    |
+| 4. Tile Row, Tile Col  | 17.7538497         | 10    |
+| 5. Tile Col, Tiler Col | 8.519104           | 10    |
+| 6. Tile Row, Tiler Row | 18.4744384         | 10    |
+```
+
+MLUP for best run ~ 1969.4 MLUPs on RTX 2070 Super
+
+## Key Optimisations
+1. Using Tiled Layout: Tile is Column Major AoS (x,y,z,q) with Column Major Tiler (assuming threading is aligned e.g. x = thread_idx.x)
+2. Comptime For loop to unroll all loops inside the kernel
+
 ## Custom Structs
 
 ### Vector
@@ -51,8 +69,8 @@ Stack allocated vector with value semantics (i.e. ImplicitelyCopyable Trait and 
 Currently Not Simd optimized for large vector (uses simple for loops)
 
 ### ContextTileTensor
-Simple Struct that manages the host and device buffer together and keeps the 2 buffers in sync. Uses familiar `.cpu()` and `.gpu()` getters to call the
-Tensor as a cpu or gpu tile tensor respecitively. Buffer copies between the 2 buffers only occur when we call different buffers in a row.
+Simple Struct that manages the host and device buffer together and keeps the 2 buffers in sync. Uses  `.cpu()` and `.gpu()` getters to call the buffer as a
+TileTensor on the cpu or gpu respecitively. Buffer copies between the 2 buffers only occur when we call different buffers in a row.
 
 ```mojo
     a = ContextTileTensor(ctx,layout)
@@ -68,18 +86,36 @@ Tensor as a cpu or gpu tile tensor respecitively. Buffer copies between the 2 bu
     
 ```
 
+## Goals for thie project
+
+1. Learning Correct Typing and Parameterization in Mojo
+    a. Supports any DType Floating point (mainly fp32 or fp64)
+2. GPU kernels and TileTensor Layouts
+3. How to call Python Modules in Mojo:
+    a. Passing buffers into Numpy arrays with Unsafe Pointers
+    b. Using Pyvista for Visualisation
+4. Creating Custom structs and functions to reduce repeated code (e.g. vector, contextTileTensor)
+5. Basic Origin tracking
+6. Mojo Packaging
+
+## Timeline
+- 2026/06/12 Implemented 3D D3Q19 LBM and non square grids
+- 2026/06/05 Implemented TiledLayouts for LBM
+- 2026/06/04 Implemeted First Variation that uses thread reording
+- 2026/05/20 LBM working with mid-gridbounce bounceback and moving wall BC. Row Major. Base Example
+
 # ToDo
 - [X] Create function to set BC - Moving and No Slip
 - [X] Create LBM kernel with mid grid bounceback
 
 ## Optimisation Tasks
-- [] Use Benchmarking to determine speed ups and optimisations 
+- [X] Use Benchmarking to determine speed ups and optimisations 
 - [] Add Simd optimisation
-- [] Add Layout Analysis
+- [X] Add Layout Analysis
 - [] Swizzling analysis
 
 ## Other
-- [] Implement 3D lattices models
+- [X] Implement 3D lattices models
 - [] Implement Custom Floating Point
 - [] Equilibrium Conditions
 

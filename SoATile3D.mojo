@@ -9,7 +9,7 @@ from std.collections import InlineArray
 from src.lbm import SOLID_NODE,FLUID_NODE,LBM_Grid,set_outer_walls,calculate_rho_and_velocity
 from src.lbm.lattice_models import get_D3Q19
 
-from src.lbm.variations.part_3.base import LBM_kernel
+from src.lbm.archive.part_3.sharedmemory_p1 import LBM_kernel
 
 from src.utils import Vector,ContextTileTensor
 from src.lbm.moments import copy_4D_to_rowMajor_layout

@@ -27,6 +27,8 @@ def set_block_shape_and_grid_dim[nx:Int,ny:Int,nz:Int,D:Int,tile_size:Int]() -> 
             return n//g if n % g == 0 else n//g + 1
 
         block_shape:Tuple[Int,Int,Int] = (g_dim, g_dim if D >= 2 else 1, g_dim if D == 3 else 1)
+
+
         grid_dim:Tuple[Int,Int,Int] = (calc_grid_dim(nx,block_shape[0]), calc_grid_dim(ny,block_shape[1]), calc_grid_dim(nz,block_shape[2]))
         
     return block_shape,grid_dim
@@ -49,9 +51,9 @@ struct LBM_Grid[float_dtype:DType,int_dtype:DType,D:Int,Q:Int,//,
     comptime BLOCK_SHAPE =  Self.__shapes[0]
     comptime GRID_DIM = Self.__shapes[1]
     comptime THREADS_PER_BLOCK = Self.BLOCK_SHAPE[0]*Self.BLOCK_SHAPE[1]*Self.BLOCK_SHAPE[2]
-    comptime n_tiles_x = Self.GRID_DIM[0]
-    comptime n_tiles_y = Self.GRID_DIM[1]
-    comptime n_tiles_z = Self.GRID_DIM[2] 
+    comptime n_tiles_x = Self.nx//Self.tile_size
+    comptime n_tiles_y = Self.ny//Self.tile_size if Self.D >= 2 else 1
+    comptime n_tiles_z = Self.nz//Self.tile_size if Self.D == 3 else 1
 
     var dx:Self.float_scalar
     var domain_size:Tuple[Self.float_scalar,Self.float_scalar,Self.float_scalar]

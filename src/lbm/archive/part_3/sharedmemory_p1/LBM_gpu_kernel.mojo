@@ -4,34 +4,37 @@ from layout.tile_tensor import stack_allocation
 from layout.tile_layout import Layout,col_major,Coord,TensorLayout
 from std.gpu.memory import AddressSpace
 from std.gpu import barrier
+from std.gpu.memory import async_copy, async_copy_wait_all
+
 from src.lbm.lattice_models import LatticeModel
 from src.lbm import LBM_Grid
 from src.lbm.flags import SOLID_NODE,FLUID_NODE
 from src.utils import Vector,ContextTileTensor
+
 
 from std.algorithm.functional import vectorize
 from std.sys import simd_width_of
 
 def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
                 lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
-                nx:Int,ny:Int,nz:Int,tile_size:Int where tile_size >= 1,
+                nx:Int,ny:Int,nz:Int,tile_size:Int,
                 //,
-                grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size], 
-                Flayout:Layout[...] where Flayout.rank == 4,  
-                BClayout:Layout[...] where BClayout.rank == 4,
-                Flaglayout:Layout[...] where Flaglayout.rank == 3,
+                grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size],
+                Flayout:Layout[...],
+                BClayout:Layout[...],
+                Flaglayout:Layout[...],
                 simd_width:Int,
                 ]
-                ( 
+                (
                 f_out:TileTensor[float_dtype,type_of(Flayout),MutAnyOrigin],
                 f_in:TileTensor[float_dtype,type_of(Flayout),ImmutAnyOrigin],
                 bc:TileTensor[float_dtype,type_of(BClayout),ImmutAnyOrigin],
                 flags:TileTensor[DType.uint8,type_of(Flaglayout),ImmutAnyOrigin],
                 inv_tau:Scalar[float_dtype]
-                ):
+                )
+                where tile_size >= 1 and Flayout.rank == 4 and BClayout.rank == 4 and Flaglayout.rank == 3:
     '''
-    Base LBM to also handle 3D and non_square Grids. Key assumption is that block dim == tile-size 
-    i.e. grid can be non-square but block is squre (same block dim in each x,y,z).
+    Shared Memory Load all flags in local threads to shared memory. Boundaries we just pull from global
     ''' 
     # Convience Variable Names and constants
     comptime assert Flaglayout.flat_rank == 3 or Flaglayout.flat_rank == 6
@@ -44,12 +47,7 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
     comptime opposite_index = lattice_model.opposite_indices
     comptime grid_shape:InlineArray[Int,3] = [nx,ny,nz]
     
-
-    comptime shared_x_dim = grid.tile_size + 2 if nx > 1 else 1
-    comptime shared_y_dim = grid.tile_size + 2 if ny > 1 else 1
-    comptime shared_z_dim = grid.tile_size + 2 if nz > 1 else 1
-    
-    shared_flags = stack_allocation[DType.uint8,AddressSpace.SHARED](col_major[shared_x_dim,shared_y_dim,shared_z_dim]())
+    # comptime assert tile_size >= 5 if D == 2 else tile_size >= 8
 
     block_x,block_dim_x = block_idx.x,block_dim.x
     block_y,block_dim_y = block_idx.y,block_dim.y
@@ -67,27 +65,17 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
     tid = thread_idx.z * block_dim.x * block_dim.y 
         + thread_idx.y * block_dim.x 
         + thread_idx.x
-        
-    # Load Flags into shared. For 3D we have 10x10x10 so we halve the x dim so we do 5x10x10 
-    comptime max_shared_tid =  shared_x_dim//2 + shared_y_dim + shared_z_dim
-    comptime shift_x = 1 if nx > 1 else 0
-    comptime shift_y = 1 if ny > 1 else 0
-    comptime shift_z = 1 if nz > 1 else 0
-    # shared_flags[local_x+shift_x,local_y+shift_y,local_z+shift_z] = flags.load(coord[DType.uint32]((x,y,z)))[0]
-    # Halo: 2 passes of 5x10x10 = 500 cells each
-    comptime half_x = shared_x_dim // 2
-    comptime cells_per_pass = half_x * shared_y_dim * shared_z_dim
-    if tid < cells_per_pass:
-        for pass_id in range(2):
-            var sx = tid % half_x + pass_id * half_x # Get Shared_ x,y,z indices i.e. for 10x10x10
-            var sy = (tid // half_x) % shared_y_dim 
-            var sz = tid // (half_x * shared_y_dim)
-            var gx = (x + sx - shift_x + nx) % nx if nx > 1 else 0
-            var gy = (y + sy - shift_y + ny) % ny if ny > 1 else 0
-            var gz = (z + sz - shift_z + nz) % nz if nz > 1 else 0
-            shared_flags[sx, sy, sz] = flags.load(coord[DType.uint32]((gx, gy, gz)))[0]
-    barrier()
 
+    # Load Flags into shared. For 3D we have 10x10x10 so we halve the x dim so we do 5x10x10 
+    comptime shared_x_dim = grid.tile_size if nx > 1 else 1
+    comptime shared_y_dim = grid.tile_size if ny > 1 else 1
+    comptime shared_z_dim = grid.tile_size if nz > 1 else 1
+    local_index:InlineArray[Int,3] = [local_x,local_y,local_z]
+    
+    pull_local:InlineArray[Int,3] = [local_x,local_y,local_z]
+    shared_flags = stack_allocation[DType.uint8,address_space=AddressSpace.SHARED](col_major[shared_x_dim,shared_y_dim,shared_z_dim]())
+    shared_flags[local_x,local_y,local_z] = flags.load(coord[DType.uint32]((x,y,z))) # Assume tile_size == block dims
+    barrier()
     # Main Compute
     if (index[0] < grid_shape[0]) and (index[1] < grid_shape[1]) and (index[2] < grid_shape[2]): # Basic Guard
         var f_new = Vector[float_dtype,Q](fill = 0.)
@@ -95,13 +83,21 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
         var rho:Scalar[float_dtype] = 0
 
         comptime for q in range(Q):
+            # Streaming Step (Pull f and flags from direction)
             direction = directions[q]
             pull_index = get_adjacent_idx[D,-1](index,grid_shape,direction) # Pulling Scheme
             pulled_f = f_in.load(coord[DType.uint32]((pull_index[0],pull_index[1],pull_index[2],q)))[0]
-            pulled_flag = flags.load(coord[DType.uint32]((pull_index[0],pull_index[1],pull_index[2])))[0]
-            
-            f_new[q] = pulled_f if pulled_flag == FLUID_NODE else f_new[q]
+            # Pull Flags from shared mem or global
+            if at_block_boundary[D,tile_size,-1](local_index,direction): # if at Boundary of block so we just pull from global
+                pulled_flag = flags.load(coord[DType.uint32]((pull_index[0],pull_index[1],pull_index[2])))[0]
+            else: # Else pull from shared mem
+                comptime for k in range(D): 
+                    pull_local[k] = local_index[k] -Int(direction[k])
+                pulled_flag = shared_flags[pull_local[0],pull_local[1],pull_local[2]]
+                # pulled_flag = shared_flags[local_x-Int(direction[0]),local_y-Int(direction[1]),local_z-Int(direction[2])]
 
+            # Apply Boundary Conditions
+            f_new[q] = pulled_f if pulled_flag == FLUID_NODE else f_new[q]
             if pulled_flag == SOLID_NODE:
                 f_opp = f_in.load(coord[DType.uint32]((x,y,z,Int(opposite_index[q]))))[0] # Need this as  Element Type is a Simd Vec of size 1
                 comptime for ii in range(D):
@@ -126,6 +122,40 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
 
 
 @always_inline
+def at_block_boundary[D:Int,tile_size:Int,shift:Int = 1](
+                        local_index:InlineArray[Int,3],
+                        direction:Vector[DType.int32,D]
+                    ) -> Bool:
+    _ = False
+    comptime for d in range(D):
+        direction_d = shift*Int(direction[d])
+        current_pull_index = local_index[d] + direction_d
+        if (current_pull_index < 0 or current_pull_index >= tile_size):
+            return True
+        # is_adj =  if not is_adj else is_adj
+    return False
+
+@always_inline
+def get_global_xyz_from_block_and_local_idx[D:Int,flag_layout:Layout[...],tile_size:Int,shift:Int = 1]
+                    (
+                        local_index:InlineArray[Int,3],
+                        block_index:InlineArray[Int,3]
+                    ) -> Tuple[InlineArray[Int,3],InlineArray[Int,3]]:
+    comptime assert flag_layout.rank == 3
+    comptime assert flag_layout.flat_rank == 6 or flag_layout.flat_rank == 3
+    comptime is_nested = flag_layout.flat_rank == 6
+    
+    adj_local_index = InlineArray[Int,3](fill =0)
+    adj_block_index = InlineArray[Int,3](fill =0)
+    
+    comptime for d in range(D):
+        adj_local_index[d] = local_index[d] % tile_size # Modulo as we flip back
+        sign = -1 if local_index[d] < 0 else 1
+        next_block =  local_index[d] < 0 or local_index[d] >= tile_size
+        adj_block_index[d] = (block_index[d] + sign if next_block else 0) % flag_layout.static_shape[1+2*d if is_nested else d]
+    return adj_local_index,adj_block_index
+
+
 
 
 @always_inline

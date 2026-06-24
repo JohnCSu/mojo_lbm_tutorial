@@ -13,30 +13,30 @@ from std.sys import simd_width_of
 
 def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
                 lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
-                nx:Int,ny:Int,nz:Int,tile_size:Int where tile_size >= 1,
+                nx:Int,ny:Int,nz:Int,tile_size:Int,
                 //,
-                grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size], 
-                Flayout:Layout[...] where Flayout.rank == 4,  
-                BClayout:Layout[...] where BClayout.rank == 4,
-                Flaglayout:Layout[...] where Flaglayout.rank == 3,
+                grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size],
+                Flayout:Layout[...],
+                BClayout:Layout[...],
+                Flaglayout:Layout[...],
                 simd_width:Int,
                 ]
-                ( 
+                (
                 f_out:TileTensor[float_dtype,type_of(Flayout),MutAnyOrigin],
                 f_in:TileTensor[float_dtype,type_of(Flayout),ImmutAnyOrigin],
                 bc:TileTensor[float_dtype,type_of(BClayout),ImmutAnyOrigin],
                 flags:TileTensor[DType.uint8,type_of(Flaglayout),ImmutAnyOrigin],
                 inv_tau:Scalar[float_dtype]
-                ):
+                )
+                where tile_size >= 1 and Flayout.rank == 4 and BClayout.rank == 4 and Flaglayout.rank == 3:
     '''
     Base LBM to also handle 3D and non_square Grids. Key assumption is that block dim == tile-size 
     i.e. grid can be non-square but block is squre (same block dim in each x,y,z).
     ''' 
     # Convience Variable Names and constants
-    comptime assert Flaglayout.flat_rank == 3 or Flaglayout.flat_rank == 6
-
+    # comptime assert Flaglayout.flat_rank == 3 or Flaglayout.flat_rank == 6
     comptime assert Flayout.rank == 4 and BClayout.rank == 4 and Flaglayout.rank == 3
-    comptime assert Flayout.static_shape[6] == Q
+    # comptime assert Flayout.static_shape[6] == Q
     comptime weights = lattice_model.weights
     comptime float_directions = lattice_model.float_directions
     comptime directions = lattice_model.directions

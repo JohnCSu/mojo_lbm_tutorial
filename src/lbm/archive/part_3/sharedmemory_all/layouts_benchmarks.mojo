@@ -17,14 +17,14 @@ def benchmark_func_row_major_AoS[
     float_dtype:DType,D:Int,Q:Int,
     lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
     nx:Int,ny:Int,nz:Int,
-    tile_size:Int where tile_size >= 1,
+    tile_size:Int,
     //,
     grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size],
     U:Scalar[float_dtype],
     tau:Scalar[float_dtype],
     *,
     ]
-    (mut b:Bencher) capturing raises:
+    (mut b:Bencher) capturing raises where tile_size >= 1:
     # This can be stored in LBM Grid
     comptime assert tile_size == 1
     comptime GRID_DIM:Tuple[Int,Int,Int] = grid.GRID_DIM
@@ -47,7 +47,7 @@ def benchmark_func_col_major_SoA[
     float_dtype:DType,D:Int,Q:Int,
     lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
     nx:Int,ny:Int,nz:Int,
-    tile_size:Int where tile_size >= 1,
+    tile_size:Int,
     //,
     grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size],
     U:Scalar[float_dtype],
@@ -55,7 +55,7 @@ def benchmark_func_col_major_SoA[
     *,
     reorder_threads:Bool = True
     ]
-    (mut b:Bencher) capturing raises:
+    (mut b:Bencher) capturing raises where tile_size >= 1:
     # This can be stored in LBM Grid
     comptime assert tile_size == 1
     comptime GRID_DIM:Tuple[Int,Int,Int] = grid.GRID_DIM
@@ -79,7 +79,7 @@ def benchmark_func_col_tile_row_tiler[
     float_dtype:DType,D:Int,Q:Int,
     lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
     nx:Int,ny:Int,nz:Int,
-    tile_size:Int where tile_size >= 1,
+    tile_size:Int,
     //,
     grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size],
     U:Scalar[float_dtype],
@@ -87,7 +87,7 @@ def benchmark_func_col_tile_row_tiler[
     *,
     reorder_threads:Bool = True
     ]
-    (mut b:Bencher) capturing raises:
+    (mut b:Bencher) capturing raises where tile_size >= 1:
     comptime assert tile_size > 1 
     # This can be stored in LBM Grid
     comptime GRID_DIM:Tuple[Int,Int,Int] = grid.GRID_DIM
@@ -117,7 +117,7 @@ def benchmark_func_row_tile_col_tiler[
     float_dtype:DType,D:Int,Q:Int,
     lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
     nx:Int,ny:Int,nz:Int,
-    tile_size:Int where tile_size >= 1,
+    tile_size:Int,
     //,
     grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size],
     U:Scalar[float_dtype],
@@ -125,7 +125,7 @@ def benchmark_func_row_tile_col_tiler[
     *,
     reorder_threads:Bool = True
     ]
-    (mut b:Bencher) capturing raises:
+    (mut b:Bencher) capturing raises where tile_size >= 1:
     comptime assert tile_size > 1
     # This can be stored in LBM Grid
     comptime GRID_DIM:Tuple[Int,Int,Int] = grid.GRID_DIM
@@ -155,7 +155,7 @@ def benchmark_func_row_tile_row_tiler[
     float_dtype:DType,D:Int,Q:Int,
     lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
     nx:Int,ny:Int,nz:Int,
-    tile_size:Int where tile_size >= 1,
+    tile_size:Int,
     //,
     grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size],
     U:Scalar[float_dtype],
@@ -163,7 +163,7 @@ def benchmark_func_row_tile_row_tiler[
     *,
     reorder_threads:Bool = True
     ]
-    (mut b:Bencher) capturing raises:
+    (mut b:Bencher) capturing raises where tile_size >= 1:
     comptime assert tile_size > 1
     # This can be stored in LBM Grid
     comptime GRID_DIM:Tuple[Int,Int,Int] = grid.GRID_DIM
@@ -192,7 +192,7 @@ def benchmark_func_col_tile_col_tiler[
     float_dtype:DType,D:Int,Q:Int,
     lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
     nx:Int,ny:Int,nz:Int,
-    tile_size:Int where tile_size >= 1,
+    tile_size:Int,
     //,
     grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size],
     U:Scalar[float_dtype],
@@ -200,7 +200,7 @@ def benchmark_func_col_tile_col_tiler[
     *,
     reorder_threads:Bool = True
     ]
-    (mut b:Bencher) capturing raises:
+    (mut b:Bencher) capturing raises where tile_size >= 1:
     comptime assert tile_size > 1
     # This can be stored in LBM Grid
     comptime GRID_DIM:Tuple[Int,Int,Int] = grid.GRID_DIM

@@ -31,7 +31,49 @@ struct LatticeModel[D:Int,Q:Int,float_dtype:DType,int_dtype:DType](ImplicitlyCop
                     break
 
 
+def get_D3Q27[float_dtype:DType = DType.float32,int_dtype:DType = DType.int32]() -> LatticeModel[3,27,float_dtype,int_dtype]:  
+    comptime D = 3
+    comptime Q = 27
+    comptime int_vector = Vector[int_dtype,D]
+    comptime float_vector = Vector[float_dtype,D]
+    
+    directions_list:List[List[Scalar[int_dtype]]]  =  
+                                      [
+                                            # Center (1)
+                                            [ 0,  0,  0],
+                                            # Faces (6)
+                                            [ 1,  0,  0], [-1,  0,  0], 
+                                            [ 0,  1,  0], [ 0, -1,  0], 
+                                            [ 0,  0,  1], [ 0,  0, -1],
+                                            # Edges (12)
+                                            [ 1,  1,  0], [-1, -1,  0], [ 1, -1,  0], [-1,  1,  0],
+                                            [ 1,  0,  1], [-1,  0, -1], [ 1,  0, -1], [-1,  0,  1],
+                                            [ 0,  1,  1], [ 0, -1, -1], [ 0,  1, -1], [ 0, -1,  1],
+                                            # Corners (8)
+                                            [ 1,  1,  1], [-1, -1, -1], [ 1,  1, -1], [-1, -1,  1],
+                                            [ 1, -1,  1], [-1,  1, -1], [-1,  1,  1], [ 1, -1, -1]
+                                        ]
+    float_directions = InlineArray[float_vector,Q](uninitialized = True)
+    for i in range(Q):
+        float_directions[i].fill_and_cast_from_list(directions_list[i])
 
+    directions = InlineArray[int_vector,Q](uninitialized = True)
+    for i in range(Q):
+        directions[i].fill_and_cast_from_list(directions_list[i])
+
+    weights =  Vector[float_dtype,Q](
+                       # Center
+    8/27.,
+    # Faces
+    2/27., 2/27., 2/27., 2/27., 2/27., 2/27.,
+    # Edges
+    1/54., 1/54., 1/54., 1/54., 1/54., 1/54., 1/54., 1/54., 1/54., 1/54., 1/54., 1/54.,
+    # Corners
+    1/216., 1/216., 1/216., 1/216., 1/216., 1/216., 1/216., 1/216.
+    )
+
+    return LatticeModel[D,Q,float_dtype,int_dtype](directions,float_directions,weights)
+    
 
 
 
@@ -121,3 +163,5 @@ def get_D2Q9[float_dtype:DType = DType.float32,int_dtype:DType = DType.int32]() 
 
     return LatticeModel[D,Q,float_dtype,int_dtype](directions,float_directions,weights)
     
+
+

@@ -4,15 +4,14 @@ from layout.tile_tensor import stack_allocation
 from layout.tile_io import copy_dram_to_sram_async
 from layout.tile_layout import Layout,col_major,Coord,TensorLayout
 from std.gpu.memory import AddressSpace,async_copy_wait_all
-from std.gpu import barrier
 from src.lbm.lattice_models import LatticeModel
 from src.lbm import LBM_Grid
 from src.lbm.flags import SOLID_NODE,FLUID_NODE
 from src.utils import Vector,ContextTileTensor
-
-
 from std.algorithm.functional import vectorize
 from std.sys import simd_width_of
+
+
 def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
                 lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
                 nx:Int,ny:Int,nz:Int,tile_size:Int,
@@ -34,13 +33,16 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
     '''
     Base LBM to also handle 3D and non_square Grids. Key assumption is that block dim == tile-size 
     i.e. grid can be non-square but block is squre (same block dim in each x,y,z).
+
+    NOTE: THIS IS IN PROGRESS. ASYNC ONLY WORKS FOR NVIDIA AMPERE OR LATER. FOR TURING AN ERROR IS RETURNED
+
     ''' 
     # Convience Variable Names and constants
+    # comptime assert False,'This assertion is triggered as this funtions is Currently being implementated Do not use'
     comptime assert Flaglayout.flat_rank == 3 or Flaglayout.flat_rank == 6
     comptime assert Flayout.rank == 4 and BClayout.rank == 4 and Flaglayout.rank == 3
     comptime assert Flayout.static_shape[6] == Q
     comptime assert tile_size % 2 == 0 or tile_size == 1,'Tile size must be even or 1'
-
     comptime weights = lattice_model.weights
     comptime float_directions = lattice_model.float_directions
     comptime directions = lattice_model.directions

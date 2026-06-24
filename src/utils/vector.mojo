@@ -14,6 +14,18 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & W
     comptime dataType =InlineArray[Scalar[Self.dtype],Self.size] 
     var data:InlineArray[Scalar[Self.dtype],Self.size]
     
+
+    @always_inline
+    def __init__(out self):
+        '''
+        Create a vector that is zero at all elements. Use keyword `uninitialized=True` for no fill
+        '''
+        self.data = InlineArray[Scalar[Self.dtype],Self.size](fill=0)
+
+    @always_inline
+    def __init__(out self,*,uninitialized:Bool):
+        self.data = InlineArray[Scalar[Self.dtype],Self.size](uninitialized = uninitialized)
+
     @always_inline
     def __init__(out self,*numbers:Scalar[Self.dtype]):
         '''
@@ -22,7 +34,7 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & W
         Args:
             numbers: Scalar[DType] a variadic tuple of Scalars to pass into the vector.
         '''
-        assert len(numbers) == Self.size, 'Number of inputs must match'
+        # assert len(numbers) == Self.size, 'Number of inputs must match'
         self.data = InlineArray[Scalar[Self.dtype],Self.size](uninitialized = True)
         
         for i in range(Self.size):
@@ -83,7 +95,7 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & W
         '''
         out = Scalar[Self.dtype](0)
         comptime for i in range(Self.size):
-            out += Self._mul(self[i],other[i])
+            out += self[i]*other[i]
         return out
     @always_inline
     def sum(self) -> Scalar[Self.dtype]:

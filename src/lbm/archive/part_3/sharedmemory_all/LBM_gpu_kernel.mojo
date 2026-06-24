@@ -1,4 +1,4 @@
-from std.gpu import block_dim,block_idx,thread_idx,barrier
+from std.gpu import block_dim,block_idx,thread_idx,barrier,grid_dim
 from layout import TileTensor,LayoutTensor,coord
 from layout.tile_tensor import stack_allocation
 from layout.tile_layout import Layout,col_major,Coord,TensorLayout
@@ -37,17 +37,17 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
     ''' 
     # Convience Variable Names and constants
     comptime assert Flaglayout.flat_rank == 3 or Flaglayout.flat_rank == 6
-
     comptime assert Flayout.rank == 4 and BClayout.rank == 4 and Flaglayout.rank == 3
     comptime assert Flayout.static_shape[6] == Q
+    comptime assert tile_size % 2 == 0 or tile_size == 1,'Tile size must be even or 1'
+
     comptime weights = lattice_model.weights
     comptime float_directions = lattice_model.float_directions
     comptime directions = lattice_model.directions
     comptime opposite_index = lattice_model.opposite_indices
     comptime grid_shape:InlineArray[Int,3] = [nx,ny,nz]
-    
-    # comptime assert tile_size >= 5 if D == 2 else tile_size >= 8
 
+    # comptime assert tile_size >= 5 if D == 2 else tile_size >= 8
     block_x,block_dim_x = block_idx.x,block_dim.x
     block_y,block_dim_y = block_idx.y,block_dim.y
     block_z,block_dim_z = block_idx.z,block_dim.z
@@ -72,41 +72,23 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
     
     shared_flags = stack_allocation[DType.uint8,AddressSpace.SHARED](col_major[shared_x_dim,shared_y_dim,shared_z_dim]())
 
-    comptime max_shared_tid =  shared_x_dim//2 + shared_y_dim + shared_z_dim
+    block_index:InlineArray[Int,3] = [block_x,block_y,block_z]
+    NUM_BLOCKS:InlineArray[Int,3] = [grid_dim.x,grid_dim.y,grid_dim.z]
+
+    comptime tid_limit = shared_x_dim//2 * shared_y_dim * shared_z_dim
+
+    if tid < tid_limit:
+        sync_set_shared_flags[D,nx,ny,nz,tile_size](tid,block_index,shared_flags,flags)
+    
     comptime shift_x = 1 if nx > 1 else 0
     comptime shift_y = 1 if ny > 1 else 0
     comptime shift_z = 1 if nz > 1 else 0
     
-    # Halo: 2 passes of 5x10x10 = 500 cells each
-    comptime half_x = shared_x_dim // 2
-    comptime tid_limit = half_x * shared_y_dim * shared_z_dim
-
-    block_index:InlineArray[Int,3] = [block_x,block_y,block_z]
-    shared_local_index = InlineArray[Int,3](uninitialized = True)
-    
-    if tid < tid_limit:
-        for pass_id in range(2): # Each thread is responsible for 2 elements along x axis (1st dim)
-            var sx = 2*(tid % half_x)+ pass_id
-            var sy = (tid // half_x) % shared_y_dim 
-            var sz = tid // (half_x * shared_y_dim)
-            
-            shared_local_index[0] = sx - shift_x
-            shared_local_index[1] = sy - shift_y
-            shared_local_index[2] = sz - shift_z
-
-            adj_local_index,adj_block_index = get_global_xyz_from_block_and_local_idx[D,Flaglayout,tile_size](shared_local_index,block_index)
-            gx = adj_block_index[0]*tile_size + adj_local_index[0]
-            gy = adj_block_index[1]*tile_size + adj_local_index[1]
-            gz = adj_block_index[2]*tile_size + adj_local_index[2]
-            
-            shared_flags[sx,sy,sz] = flags.load(coord[DType.int32]((gx,gy,gz)))
-
-    barrier()
-    
     var f_new = Vector[float_dtype,Q](fill = 0.)
     var velocity = Vector[float_dtype,D](uninitialized = True)
     var rho:Scalar[float_dtype] = 0
-   
+    barrier()
+    
     if (index[0] < grid_shape[0]) and (index[1] < grid_shape[1]) and (index[2] < grid_shape[2]): # Basic Guard
         comptime for q in range(Q):
             direction = directions[q]
@@ -116,10 +98,7 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
             local_flag_x = local_x + shift_x - Int(direction[0])
             local_flag_y = local_y + shift_y - (Int(direction[1]) if D >= 2 else 0)
             local_flag_z = local_z + shift_z - (Int(direction[2]) if D ==3 else 0)
-    #     # pulled_flag = flags.load(coord[DType.uint32]((pull_index[0],pull_index[1],pull_index[2])))[0]
             pulled_flag = shared_flags[local_flag_x,local_flag_y,local_flag_z]
-    #     # if pulled_flag != pulled_flag_s:
-    #     #     print(x,y,z,q,pulled_flag,pulled_flag_s,pulled_flag == pulled_flag_s)
             f_new[q] = pulled_f if pulled_flag == FLUID_NODE else f_new[q]
 
             if pulled_flag == SOLID_NODE:
@@ -143,6 +122,78 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
     comptime for q in range(Q):
         f_eq = SRT(weights[q],rho,velocity,u_dot_u,float_directions[q])            
         f_out.store(coord = coord[DType.uint32]((x,y,z,q)),value = f_new[q] -  inv_tau*(f_new[q]- f_eq))
+
+
+
+
+@always_inline
+def sync_set_shared_flags[dtype:DType,
+                        flagLayoutType:TensorLayout,
+                        //,
+                        D:Int,
+                        nx:Int,
+                        ny:Int,
+                        nz:Int,
+                        tile_size:Int]
+                        (tid:Int,
+                        block_index:InlineArray[Int,3],
+                        shared_flags:TileTensor[dtype,_,MutAnyOrigin,address_space = AddressSpace.SHARED,...],
+                        flags:TileTensor[dtype,flagLayoutType,_],
+                        ):
+    comptime assert shared_flags.flat_rank == 3
+    comptime shared_x_dim = shared_flags.static_shape[0]
+    comptime shared_y_dim = shared_flags.static_shape[1]
+    comptime shared_z_dim = shared_flags.static_shape[2]
+
+    comptime max_shared_tid = shared_x_dim//2 + shared_y_dim + shared_z_dim
+    comptime shift_x = 1 if nx > 1 else 0
+    comptime shift_y = 1 if ny > 1 else 0
+    comptime shift_z = 1 if nz > 1 else 0
+    
+    # Halo: 2 passes of 5x10x10 = 500 cells each
+    comptime half_x = shared_x_dim // 2
+    comptime tid_limit = half_x * shared_y_dim * shared_z_dim
+
+    shared_local_index = InlineArray[Int,3](uninitialized = True)
+
+    comptime for pass_id in range(2): # Each thread is responsible for 2 elements along x axis (1st dim)
+        var sx = 2*(tid % half_x)+ pass_id
+        var sy = (tid // half_x) % shared_y_dim 
+        var sz = tid // (half_x * shared_y_dim)
+        
+        shared_local_index[0] = sx - shift_x
+        shared_local_index[1] = sy - shift_y
+        shared_local_index[2] = sz - shift_z
+    
+        s_local_index,s_block_index = get_global_xyz_from_block_and_local_idx_old[D,flagLayoutType,tile_size](shared_local_index,block_index)
+        gx = s_local_index[0] + s_block_index[0]*tile_size
+        gy = s_local_index[1] + s_block_index[1]*tile_size
+        gz = s_local_index[2] + s_block_index[2]*tile_size
+        
+        shared_flags[sx,sy,sz] = flags.load(coord[DType.int32]((gx,gy,gz)))
+    # barrier()
+
+
+@always_inline
+def get_global_xyz_from_block_and_local_idx_old[D:Int,FlagLayoutType:TensorLayout,tile_size:Int]
+                    (
+                        local_index:InlineArray[Int,3],
+                        block_index:InlineArray[Int,3]
+                    ) -> Tuple[InlineArray[Int,3],InlineArray[Int,3]]:
+    comptime assert FlagLayoutType.rank == 3
+    comptime assert FlagLayoutType.flat_rank == 6 or FlagLayoutType.flat_rank == 3
+    comptime is_nested = FlagLayoutType.flat_rank == 6
+    
+    adj_local_index = InlineArray[Int,3](fill =0)
+    adj_block_index = InlineArray[Int,3](fill =0)
+    
+    comptime for d in range(D):
+        adj_local_index[d] = local_index[d] % tile_size # Modulo as we flip back
+        sign = -1 if local_index[d] < 0 else 1
+        next_block =  local_index[d] < 0 or local_index[d] >= tile_size
+        adj_block_index[d] = (block_index[d] + (sign if next_block else 0)) % FlagLayoutType.static_shape[1+2*d if is_nested else d]
+    return adj_local_index,adj_block_index
+
 
 
 @always_inline

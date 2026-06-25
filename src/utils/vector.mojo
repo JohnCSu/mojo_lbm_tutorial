@@ -20,7 +20,7 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & W
         '''
         Create a vector that is zero at all elements. Use keyword `uninitialized=True` for no fill
         '''
-        self.data = InlineArray[Scalar[Self.dtype],Self.size](fill=0)
+        comptime assert False, 'Do not use empty constructor'
 
     @always_inline
     def __init__(out self,*,uninitialized:Bool):
@@ -35,9 +35,17 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & W
             numbers: Scalar[DType] a variadic tuple of Scalars to pass into the vector.
         '''
         # assert len(numbers) == Self.size, 'Number of inputs must match'
+
+        debug_assert[assert_mode="safe"](
+            len(numbers) == Self.size,
+            "InlineArray: expected ",
+            Self.size,
+            " numbers, received ",
+            len(numbers),
+        )
         self.data = InlineArray[Scalar[Self.dtype],Self.size](uninitialized = True)
         
-        for i in range(Self.size):
+        comptime for i in range(Self.size):
             self.data[i] = numbers[i]
     
     @always_inline
@@ -119,7 +127,7 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & W
     @always_inline
     @staticmethod
     def _elementWise[func: def(Scalar[Self.dtype],Scalar[Self.dtype]) thin -> Scalar[Self.dtype]](a:Self,b:Self) -> Self:
-        out = Self()
+        out = Self(uninitialized = True)
         comptime for i in range(Self.size):
             out[i] = func(a[i],b[i])
         return out
@@ -127,7 +135,7 @@ struct Vector[dtype:DType, size: Int](ImplicitlyCopyable & Sized & Equatable & W
     @always_inline
     @staticmethod
     def _scalarOp[func: def(Scalar[Self.dtype],Scalar[Self.dtype]) thin ->   Scalar[Self.dtype], *, reverse:Bool = False](a:Self,b:Scalar[Self.dtype]) -> Self:
-        out = Self()
+        out = Self(uninitialized = True)
         comptime for i in range(Self.size):
             comptime if reverse:
                 out[i] = func(b,a[i])

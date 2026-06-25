@@ -8,8 +8,8 @@ from std.math import ceildiv
 from std.collections import InlineArray
 from src.lbm import SOLID_NODE,FLUID_NODE,LBM_Grid,get_D2Q9,set_outer_walls,calculate_rho_and_velocity
 # from src.lbm.variations.part_2.SoA_Tile import LBM_kernel
-from src.lbm.archive.part_3.sharedmemory_async import LBM_kernel
-# from src.lbm.archive.part_3.base import LBM_kernel
+# from src.lbm.archive.part_3.sharedmemory_async import LBM_kernel
+from src.lbm.archive.part_3.base import LBM_kernel
 from src.utils import Vector,ContextTileTensor
 
 comptime float_dtype = DType.float32
@@ -17,7 +17,7 @@ comptime int_dtype = DType.int32
 comptime float_scalar = Scalar[float_dtype]
 comptime D2Q9 = get_D2Q9()
 comptime D,Q = (2,9)
-comptime N = 32
+comptime N = 128 
 comptime L = 1.
 comptime dx = L/float_scalar(N-1)
 comptime (nx,ny,nz) = (N,N,1)
@@ -87,19 +87,6 @@ def main() raises:
     set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'-X',SOLID_NODE,[0,0],1.)
     set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'+X',SOLID_NODE,[0,0],1.)
 
-
-    # for x in range(N):
-    #     for y in range(N):
-    #         print(flags[])
-    # val:UInt8 = 1
-    # for x in range(tile_size):
-    #     for y in range(tile_size):
-    #         flags.cpu().store(coord[DType.int32]((x,y,0)),value = val)
-    #         val += 1
-    for xx in range(tile_size):
-        for yy in range(tile_size):
-            print(flags.cpu().load(coord[DType.int32]((xx,yy,0))), end = ' ')
-        print()
     ctx.synchronize()
     # Copy To GPU()
     _ = flags.gpu()
@@ -110,10 +97,10 @@ def main() raises:
     ctx.synchronize()
     #Compile Functions
     comptime LBM_ = LBM_kernel[grid,f_layout,bc_layout,flag_layout,simd_width]
-    LBM_func = ctx.compile_function[LBM_]()
+    LBM_func = ctx.compile_function[LBM_,LBM_]()
 
     comptime get_u_and_rho = calculate_rho_and_velocity[grid,f_layout,density_layout,velocity_layout]
-    calc_rho_and_u_gpu = ctx.compile_function[get_u_and_rho]()
+    calc_rho_and_u_gpu = ctx.compile_function[get_u_and_rho,get_u_and_rho]()
  
     ctx.synchronize()
     comptime MAX_ITERS = 10_000

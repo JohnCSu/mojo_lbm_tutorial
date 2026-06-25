@@ -12,6 +12,7 @@ from src.lbm.archive.part_3 import sharedmemory_p1, sharedmemory_all
 
 from src.utils import Vector,ContextTileTensor
 from std.benchmark import Bench, BenchConfig, Bencher, BenchId, keep,run
+import std.sys as sys
 
 comptime float_dtype = DType.float32
 comptime int_dtype = DType.int32
@@ -63,7 +64,7 @@ def main() raises:
     var bench = Bench(bench_config.copy())
 
     print('All Indexing assumes of the form: (x,y,z,q)')
-    # bench.bench_function[benchmark_1](BenchId('1. Base Row Major AoS'))
+    bench.bench_function[benchmark_1](BenchId('1. Base Row Major AoS'))
     bench.bench_function[benchmark_2](BenchId('2. Base Col Major SoA'))
     bench.bench_function[benchmark_3](BenchId('3. Tile Col, Tiler Row'))
     bench.bench_function[benchmark_4](BenchId('4. Tile Row, Tile Col'))
@@ -72,6 +73,6 @@ def main() raises:
     bench.bench_function[benchmark_7](BenchId('7. Shared Memory For Flags tile, Global Pull For boundary'))
     bench.bench_function[benchmark_8](BenchId('8. Map Flags + Halo region to Shared'))
     # bench.bench_function[benchmark_9](BenchId('9. Shared Memory For Flags Async'))
-
     
+    print("Mojo Version: {}.{}.{}".format(sys.defines.MojoVersion().major, sys.defines.MojoVersion().minor,sys.defines.MojoVersion().patch))
     print(bench)

@@ -9,7 +9,7 @@ from std.collections import InlineArray
 from src.lbm import SOLID_NODE,FLUID_NODE,LBM_Grid,set_outer_walls,calculate_rho_and_velocity
 from src.lbm.lattice_models import get_D3Q19
 
-from src.lbm.archive.part_3.sharedmemory_p1 import LBM_kernel
+from src.lbm.archive.part_3.base import LBM_kernel
 
 from src.utils import Vector,ContextTileTensor
 from src.lbm.moments import copy_4D_to_rowMajor_layout
@@ -47,7 +47,7 @@ comptime bc_layout = blocked_product(bc_tile,bc_tiler)
 comptime density_layout = row_major[nx,ny,nz]()
 comptime velocity_layout = row_major[D,nx,ny,nz]()
 comptime bc_row_major = row_major[nx,ny,nz,D+1]()
-
+from std.time import sleep
 def main() raises:
     comptime assert N % tile_size == 0 , 'tile_size must divide N'
     print(GRID_DIM)
@@ -63,7 +63,7 @@ def main() raises:
     v_lat = U*L_lat/Re
     tau = v_lat/(1/3.) +0.5
     print('Tau {}'.format(tau))
-    print(D3Q19.opposite_indices)
+    # print(D3Q19.opposite_indices)
     ctx = DeviceContext()
     
     flags = ContextTileTensor[DType.uint8](ctx,flag_layout)
@@ -74,32 +74,33 @@ def main() raises:
     u = ContextTileTensor[float_dtype](ctx,velocity_layout)
     rho = ContextTileTensor[float_dtype](ctx,density_layout)
 
-    # Set up
+    ctx.synchronize()
 
     f.fill(1./Float32(Q))
     f_out.fill(1./Float32(Q))
 
+    # ctx.synchronize()
     set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'+Y',SOLID_NODE,[U,0,0],1.)
     set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'-Y',SOLID_NODE,[0,0,0],1.)
     set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'+X',SOLID_NODE,[0,0,0],1.)
     set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'-X',SOLID_NODE,[0,0,0],1.)
     
-    ctx.synchronize()
+    # ctx.synchronize()
     # Copy To GPU()
     _ = flags.gpu()
     _ = bc.gpu()
     _ = f.gpu()
     _ = f_out.gpu()
 
-    ctx.synchronize()
-    #Compile Functions
+    # ctx.synchronize()
+    # #Compile Functions
     comptime LBM_ = LBM_kernel[grid,f_layout,bc_layout,flag_layout,simd_width]
     LBM_func = ctx.compile_function[LBM_,LBM_]()
 
     comptime get_u_and_rho = calculate_rho_and_velocity[grid,f_layout,density_layout,velocity_layout]
     calc_rho_and_u_gpu = ctx.compile_function[get_u_and_rho,get_u_and_rho]()
  
-    ctx.synchronize()
+    # ctx.synchronize()
     
     # Run Simulation
     for t in range(10000):
@@ -115,74 +116,74 @@ def main() raises:
     ctx.synchronize()
     # Get Final U and rho
     ctx.enqueue_function(calc_rho_and_u_gpu,f.gpu(),rho.gpu(),u.gpu(),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
-
-    ctx.synchronize()
+    return None
+    # ctx.synchronize()
     
-    np = Python.import_module('numpy')
-    pd = Python.import_module('pandas')
-    pv = Python.import_module('pyvista')
-    plt = Python.import_module('matplotlib.pyplot')
-    ctypes = Python.import_module("ctypes")
+    # np = Python.import_module('numpy')
+    # pd = Python.import_module('pandas')
+    # pv = Python.import_module('pyvista')
+    # plt = Python.import_module('matplotlib.pyplot')
+    # ctypes = Python.import_module("ctypes")
 
 
-    bc_row = ContextTileTensor[float_dtype](ctx,bc_row_major)
+    # bc_row = ContextTileTensor[float_dtype](ctx,bc_row_major)
 
-    copy_4D_to_rowMajor_layout(bc.cpu(),bc_row.cpu())
+    # # copy_4D_to_rowMajor_layout(bc.cpu(),bc_row.cpu())
 
-    u_np = (u.buffer_to_numpy()/U).reshape(D,nx,ny,nz)
-    bc_np = (bc_row.buffer_to_numpy()/U).reshape(nx,ny,nz,D+1)
+    # u_np = (u.buffer_to_numpy()/U).reshape(D,nx,ny,nz)
+    # bc_np = (bc_row.buffer_to_numpy()/U).reshape(nx,ny,nz,D+1)
 
 
-    print(u_np.shape)
+    # print(u_np.shape)
 
-    x = np.linspace(0, grid.domain_size[0], nx)
-    y = np.linspace(0, grid.domain_size[1], ny)
-    z = np.linspace(0, grid.domain_size[2], nz)
-    m = np.meshgrid(x, y, z,indexing = 'ij')
-    xx,yy,zz = m[0],m[1],m[2]
-    pv_mesh = pv.StructuredGrid(xx, yy, zz)
-    print(pv_mesh)
-    u_plot = u_np[0,all_slice,all_slice,all_slice].T
-    v_plot = u_np[1,all_slice,all_slice,all_slice].T
-    w_plot = u_np[2,all_slice,all_slice,all_slice].T
+    # x = np.linspace(0, grid.domain_size[0], nx)
+    # y = np.linspace(0, grid.domain_size[1], ny)
+    # z = np.linspace(0, grid.domain_size[2], nz)
+    # m = np.meshgrid(x, y, z,indexing = 'ij')
+    # xx,yy,zz = m[0],m[1],m[2]
+    # pv_mesh = pv.StructuredGrid(xx, yy, zz)
+    # print(pv_mesh)
+    # u_plot = u_np[0,all_slice,all_slice,all_slice].T
+    # v_plot = u_np[1,all_slice,all_slice,all_slice].T
+    # w_plot = u_np[2,all_slice,all_slice,all_slice].T
 
-    u_mag = np.sqrt(u_plot**2 + v_plot**2 + w_plot**2)
-    print(u_mag.shape)
-    pv_mesh.point_data['U_mag'] = u_mag.ravel()
-    pv_mesh.point_data['U velocity'] = u_plot.ravel()
-    pv_mesh.point_data['V velocity'] = v_plot.ravel()
-    pv_mesh.point_data['u bc'] = bc_np[all_slice,all_slice,all_slice,0].T.ravel()
-    plotter = pv.Plotter()
-    plotter.add_mesh(pv_mesh,scalars ='U_mag',show_edges = False, cmap= 'jet',clim = [0,1],nan_color='white',)
-    plotter.view_xy()
-    plotter.show_axes()
-    plotter.show() # screenshot = 'LDC_Re100.png'
+    # u_mag = np.sqrt(u_plot**2 + v_plot**2 + w_plot**2)
+    # print(u_mag.shape)
+    # pv_mesh.point_data['U_mag'] = u_mag.ravel()
+    # pv_mesh.point_data['U velocity'] = u_plot.ravel()
+    # pv_mesh.point_data['V velocity'] = v_plot.ravel()
+    # pv_mesh.point_data['u bc'] = bc_np[all_slice,all_slice,all_slice,0].T.ravel()
+    # plotter = pv.Plotter()
+    # plotter.add_mesh(pv_mesh,scalars ='U_mag',show_edges = False, cmap= 'jet',clim = [0,1],nan_color='white',)
+    # plotter.view_xy()
+    # plotter.show_axes()
+    # plotter.show() # screenshot = 'LDC_Re100.png'
     
-    # import pandas as pd
-    v_benchmark = pd.read_csv('v_velocity_results.csv',sep = ',')
-    u_benchmark = pd.read_csv('u_velocity_results.txt',sep= '\t')
-    
-    
-    horizontal_line = pv_mesh.sample_over_line( Python.tuple(0,L/2,0),Python.tuple(L,L/2,0),resolution= nx)
-    v_05 = horizontal_line.point_data['V velocity']
-    
-    plt.plot(v_benchmark['%x'],v_benchmark['100'],'o',label = 'Ghia et al')
-    plt.plot(horizontal_line.points[all_slice,0],v_05,label ='lbm Results')
-    plt.xlabel('x')
-    plt.ylabel('v velocity')
-    plt.legend()
-    plt.show()
+    # # import pandas as pd
+    # v_benchmark = pd.read_csv('v_velocity_results.csv',sep = ',')
+    # u_benchmark = pd.read_csv('u_velocity_results.txt',sep= '\t')
     
     
-    vertical_line = pv_mesh.sample_over_line(Python.tuple(L/2,0,0),Python.tuple(L/2,L,0),resolution= ny)
-    u_05 = vertical_line.point_data['U velocity']
+    # horizontal_line = pv_mesh.sample_over_line( Python.tuple(0,L/2,0),Python.tuple(L,L/2,0),resolution= nx)
+    # v_05 = horizontal_line.point_data['V velocity']
     
-    plt.plot(u_benchmark['%y'],u_benchmark['100'],'o',label = 'Ghia et al')
-    plt.plot(vertical_line.points[all_slice,1],u_05,label ='lbm Results')
-    plt.xlabel('y')
-    plt.ylabel('u velocity')
-    plt.legend()
-    plt.show()
+    # plt.plot(v_benchmark['%x'],v_benchmark['100'],'o',label = 'Ghia et al')
+    # plt.plot(horizontal_line.points[all_slice,0],v_05,label ='lbm Results')
+    # plt.xlabel('x')
+    # plt.ylabel('v velocity')
+    # plt.legend()
+    # plt.show()
+    
+    
+    # vertical_line = pv_mesh.sample_over_line(Python.tuple(L/2,0,0),Python.tuple(L/2,L,0),resolution= ny)
+    # u_05 = vertical_line.point_data['U velocity']
+    
+    # plt.plot(u_benchmark['%y'],u_benchmark['100'],'o',label = 'Ghia et al')
+    # plt.plot(vertical_line.points[all_slice,1],u_05,label ='lbm Results')
+    # plt.xlabel('y')
+    # plt.ylabel('u velocity')
+    # plt.legend()
+    # plt.show()
         
     
     # print(b_np.reshape(nx,ny,D+1)[slice(None,None,None),slice(None,None,None),0])

@@ -20,6 +20,7 @@ Implementation and analysis of LBM on GPU using Mojo Programming Language
 2. Layout independent kernel so works for row/col major arrays and tiled arrays (e.g. a row major tile embedded in a col major tiler) using natual indexing. Tile size can be adjusted
 3. Leverages only the mojo std library for setup and solver (leverages python for visualisation)
 4. For FP32/FP32 256^3 cube ~ 2200 MLUPs for D3Q19 on RTX 2070 Super
+5. Run on Nvidia, AMD and Apple GPUs
 
 ## Limitations
 1. Single GPU Only for now
@@ -46,6 +47,7 @@ Num Points On grid: 16,777,216
 Non Tiled Grid Dim: (32, 32, 32) Block_Shape (8, 8, 8) 
 Tiled Grid Dim: (32, 32, 32) Block_Shape (8, 8, 8) 
 
+Version: 1.0.0b2
 | name                                                      | met (ms)           | iters |
 | --------------------------------------------------------- | ------------------ | ----- |
 | 2. Base Col Major SoA                                     | 12.228749          | 10    |
@@ -55,9 +57,26 @@ Tiled Grid Dim: (32, 32, 32) Block_Shape (8, 8, 8)
 | 6. Tile Row, Tiler Row                                    | 17.9165283         | 10    |
 | 7. Shared Memory For Flags tile, Global Pull For boundary | 8.013021           | 10    |
 | 8. Map Flags from Tile+ Halo region to Shared             | 7.4686653000000005 | 10    |
+
+
+Version: 1.0.0b1
+| name                                                      | met (ms)           | iters |
+| --------------------------------------------------------- | ------------------ | ----- |
+| 1. Base Row Major AoS                                     | 33.597061100000005 | 10    |
+| 2. Base Col Major SoA                                     | 12.0542205         | 10    |
+| 3. Tile Col, Tiler Row                                    | 8.4702178          | 10    |
+| 4. Tile Row, Tile Col                                     | 17.895464999999998 | 10    |
+| 5. Tile Col, Tiler Col                                    | 8.0567901          | 10    |
+| 6. Tile Row, Tiler Row                                    | 18.3676544         | 10    |
+| 7. Shared Memory For Flags tile, Global Pull For boundary | 8.5808067          | 10    |
+| 8. Map Flags + Halo region to Shared                      | 7.9359169          | 10    |
+
 ```
 
-MLUP for best run ~ 2200 MLUPs on RTX 2070 Super
+MLUP for best run  2000 - 2200 MLUPs on RTX 2070 Super 
+
+
+
 
 ## Key Optimisations
 1. Using Tiled Layout: Tile is Column Major AoS (x,y,z,q) with Column Major Tiler (threading index is aligned with e.g. x = thread_idx.x to allow for different dimensions on the grid)

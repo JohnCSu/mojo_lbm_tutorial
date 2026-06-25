@@ -3,3 +3,4 @@ run_benchmark
 *.ncu-rep
 *.nsys-rep
 mojo_testing*
+debug_fill.mojo

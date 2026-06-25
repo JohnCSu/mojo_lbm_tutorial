@@ -1,1 +1,1 @@
-from src.lbm.archive.part_3.base import LBM_kernel
+from .LBM_gpu_kernel import LBM_kernel

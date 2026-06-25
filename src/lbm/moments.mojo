@@ -42,10 +42,12 @@ def calculate_rho_and_velocity[ float_dtype:DType,D:Int,Q:Int,
                                 Flayout:Layout[...] ,
                                 RhoLayout:Layout[...],
                                 VelocityLayout:Layout[...] ,
-                                config:LBM_Config = LBM_Config()
+                                config:LBM_Config = LBM_Config(),
+                                *,
+                                f_dtype:DType = float_dtype if config.f_dtype is None else config.f_dtype.value()
                                 ]
                                 (
-                                    f:TileTensor[float_dtype,type_of(Flayout),MutAnyOrigin],
+                                    f:TileTensor[f_dtype,type_of(Flayout),MutAnyOrigin],
                                     density:TileTensor[float_dtype,type_of(RhoLayout),MutAnyOrigin],
                                     velocity:TileTensor[float_dtype,type_of(VelocityLayout),MutAnyOrigin],
                                 
@@ -58,7 +60,7 @@ def calculate_rho_and_velocity[ float_dtype:DType,D:Int,Q:Int,
     '''
     
     comptime grid_shape = Vector[DType.int32,3](Int32(nx),Int32(ny),Int32(nz))
-    comptime f_as_lt = LayoutTensor[float_dtype,Flayout.to_layout(),MutAnyOrigin]
+    comptime f_as_lt = LayoutTensor[f_dtype,Flayout.to_layout(),MutAnyOrigin]
     comptime vel_as_lt = LayoutTensor[float_dtype,VelocityLayout.to_layout(),MutAnyOrigin]
     comptime rho_as_lt = LayoutTensor[float_dtype,RhoLayout.to_layout(),MutAnyOrigin]
 
@@ -71,17 +73,25 @@ def calculate_rho_and_velocity[ float_dtype:DType,D:Int,Q:Int,
     y = block_dim.y * block_idx.y + thread_idx.y
     z = block_dim.z * block_idx.z + thread_idx.z
     index = Vector[DType.int32,3](Int32(x),Int32(y),Int32(z))
+    f_vec = Vector[float_dtype,Q](fill = 0)
 
+    
     if index[0] < grid_shape[0] and index[1] < grid_shape[1] and index[2] < grid_shape[2]: # Basic Guard
+        comptime if config.use_float16c:
+            comptime assert f_dtype == DType.uint16
+            comptime for q in range(Q):
+                f_vec[q] = Scalar[float_dtype](config.fp16c_to_fp32(f_lt[x,y,z,q][0]))
+        else:
+            comptime assert f_dtype == float_dtype
+            comptime for q in range(Q):
+                f_vec[q] = Scalar[float_dtype](f_lt[x,y,z,q][0])
+
         var u = Vector[float_dtype,D](fill = 0.)
         var rho = Scalar[float_dtype](0)
+    
         for q in range(Q):
-            comptime if f_is_first_index:
-                rho += f_lt[q,x,y,z][0]
-                u += f_lt[q,x,y,z][0]*lattice_model.float_directions[q]
-            else:
-                rho += f_lt[x,y,z,q][0]
-                u += f_lt[x,y,z,q][0]*lattice_model.float_directions[q]
+            rho += f_vec[q]
+            u += f_vec[q]*lattice_model.float_directions[q]
         
         comptime if config.DDF_shift:
             rho += 1
@@ -90,5 +100,3 @@ def calculate_rho_and_velocity[ float_dtype:DType,D:Int,Q:Int,
         density_lt[x,y,z] = rho
         comptime for i in range(D):
             velocity_lt[i,x,y,z] = u[i]
-
-

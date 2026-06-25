@@ -16,6 +16,7 @@ comptime float_dtype = DType.float32
 comptime int_dtype = DType.int32
 comptime float_scalar = Scalar[float_dtype]
 comptime D3Q19 = get_D3Q19[DType.float32,DType.int32]()
+
 comptime D,Q = (D3Q19.D,D3Q19.Q)
 comptime N = 32
 comptime L = 1.
@@ -25,7 +26,8 @@ comptime num_points = nx*ny*nz
 comptime tile_size = 8
 
 
-comptime config = LBM_Config()
+comptime config = LBM_Config(DDF_shift = True,use_float16c = True)
+comptime f_dtype = DType.uint16 if config.use_float16c else float_dtype
 comptime grid = LBM_Grid[D3Q19,nx,ny,nz,tile_size](dx)
 comptime all_slice = slice(None,None,None)
 
@@ -48,7 +50,7 @@ comptime bc_layout = blocked_product(bc_tile,bc_tiler)
 
 comptime density_layout = row_major[nx,ny,nz]()
 comptime velocity_layout = row_major[D,nx,ny,nz]()
-comptime bc_row_major = row_major[nx,ny,nz,D+1]()
+
 
 def main() raises:
     comptime assert N % tile_size == 0 , 'tile_size must divide N'
@@ -70,16 +72,19 @@ def main() raises:
     
     flags = ContextTileTensor[DType.uint8](ctx,flag_layout)
     bc = ContextTileTensor[float_dtype](ctx,bc_layout)
-    f = ContextTileTensor[float_dtype](ctx,f_layout)
-    f_out = ContextTileTensor[float_dtype](ctx,f_layout)
+    f = ContextTileTensor[f_dtype](ctx,f_layout)
+    f_out = ContextTileTensor[f_dtype](ctx,f_layout)
 
     u = ContextTileTensor[float_dtype](ctx,velocity_layout)
     rho = ContextTileTensor[float_dtype](ctx,density_layout)
 
     # Set up
-    if not config.DDF_shift:
-        f.fill(1./Float32(Q))
-        f_out.fill(1./Float32(Q))
+    comptime if not config.DDF_shift and not config.use_float16c:
+        f.fill(1./Scalar[f_dtype](Q))
+        f_out.fill(1./Scalar[f_dtype](Q))
+    else:
+        f.fill(0)
+        f_out.fill(0)
 
     set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'+Y',SOLID_NODE,[U,0,0],1.)
     set_outer_walls[grid,flag_layout,bc_layout](flags.cpu(),bc.cpu(),'-Y',SOLID_NODE,[0,0,0],1.)
@@ -128,16 +133,7 @@ def main() raises:
     plt = Python.import_module('matplotlib.pyplot')
     ctypes = Python.import_module("ctypes")
 
-
-    bc_row = ContextTileTensor[float_dtype](ctx,bc_row_major)
-
-    copy_4D_to_rowMajor_layout(bc.cpu(),bc_row.cpu())
-
     u_np = (u.buffer_to_numpy()/U).reshape(D,nx,ny,nz)
-    bc_np = (bc_row.buffer_to_numpy()/U).reshape(nx,ny,nz,D+1)
-
-
-    print(u_np.shape)
 
     x = np.linspace(0, grid.domain_size[0], nx)
     y = np.linspace(0, grid.domain_size[1], ny)
@@ -155,7 +151,7 @@ def main() raises:
     pv_mesh.point_data['U_mag'] = u_mag.ravel()
     pv_mesh.point_data['U velocity'] = u_plot.ravel()
     pv_mesh.point_data['V velocity'] = v_plot.ravel()
-    pv_mesh.point_data['u bc'] = bc_np[all_slice,all_slice,all_slice,0].T.ravel()
+    
     plotter = pv.Plotter()
     plotter.add_mesh(pv_mesh,scalars ='U_mag',show_edges = False, cmap= 'jet',clim = [0,1],nan_color='white',)
     plotter.view_xy()

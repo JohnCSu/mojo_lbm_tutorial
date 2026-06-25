@@ -16,9 +16,11 @@ Implementation and analysis of LBM on GPU using Mojo Programming Language
 </table>
 
 ## Features
-1. Single SRT Kernel for all dimensions and lattice models (D2Q9, D3Q19 and D3Q27) leveraging mojo metaprogramming
-2. Layout independent kernel so works for row/col major arrays and tiled arrays (e.g. a row major tile embedded in a col major tiler) using natual indexing. Tile size can be adjusted
-3. Leverages only the mojo std library for setup and solver (leverages python for visualisation)
+1. Single SRT Kernel serves for all dimensions and lattice models (D2Q9, D3Q19 and D3Q27) leveraging mojo metaprogramming
+2. Layout independent kernel so works for row/col major arrays and tiled arrays (e.g. a row major tile embedded in a col major tiler) using natual indexing (x,y,z,q indexing). Tile size can be adjusted
+3. Leverages **only** the mojo std library for setup and solver (leverages python for basic visualisation)
+4. DDF shifting for improved numerical stability and Float16c for stable 16 bit simulations see [Fluidx3D](https://github.com/ProjectPhysX/FluidX3D) and [Paper](https://www.researchgate.net/publication/362275548_Accuracy_and_performance_of_the_lattice_Boltzmann_method_with_64-bit_32-bit_and_customized_16-bit_number_formats))
+
 4. For FP32/FP32 256^3 cube ~ 2200 MLUPs for D3Q19 on RTX 2070 Super
 5. Run on Nvidia, AMD and Apple GPUs
 
@@ -81,6 +83,7 @@ MLUP for best run  2000 - 2200 MLUPs on RTX 2070 Super
 ## Key Optimisations
 1. Using Tiled Layout: Tile is Column Major AoS (x,y,z,q) with Column Major Tiler (threading index is aligned with e.g. x = thread_idx.x to allow for different dimensions on the grid)
 2. Comptime For loop to unroll all loops inside the kernel
+3. Float16c to halve memory bandwidth and footprint (~2x speedup) and DDF Shifting to reduce numerical tradeoff (learnt from Fluidx3D and [Paper](https://www.researchgate.net/publication/362275548_Accuracy_and_performance_of_the_lattice_Boltzmann_method_with_64-bit_32-bit_and_customized_16-bit_number_formats))
 
 ## Custom Structs
 
@@ -95,7 +98,6 @@ TileTensor on the cpu or gpu respecitively. Buffer copies between the 2 buffers 
 
 ```mojo
     a = ContextTileTensor(ctx,layout)
-
     cpu_tensor = a.cpu() # No Copy as initial call
     # Some CPU Work Here
     # ...
@@ -104,7 +106,6 @@ TileTensor on the cpu or gpu respecitively. Buffer copies between the 2 buffers 
     gpu_tensor2 = a.gpu() # No Copy as last call was the same GPU
       
     cpu_tensor = a.cpu() # Copy is perfomed from GPU to CPU
-    
 ```
 
 ## Goals for thie project
@@ -120,6 +121,8 @@ TileTensor on the cpu or gpu respecitively. Buffer copies between the 2 buffers 
 6. Mojo Packaging
 
 ## Timeline
+- 2026/06/25 Added DDF shifting and Float16c support see [Paper](https://www.researchgate.net/publication/362275548_Accuracy_and_performance_of_the_lattice_Boltzmann_method_with_64-bit_32-bit_and_customized_16-bit_number_formats)
+
 - 2026/06/24 Added D3Q27 Models
 - 2026/06/12 Implemented 3D D3Q19 LBM and non square grids
 - 2026/06/05 Implemented TiledLayouts for LBM

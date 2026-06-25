@@ -2,6 +2,7 @@ from std.gpu import block_dim,block_idx,thread_idx
 from layout import TileTensor,LayoutTensor,coord
 from layout.tile_layout import Layout,row_major,Coord,TensorLayout
 from .LBM import LBM_Grid
+from .config import LBM_Config
 from .lattice_models import LatticeModel
 from src.utils import Vector,ContextTileTensor
 
@@ -41,6 +42,7 @@ def calculate_rho_and_velocity[ float_dtype:DType,D:Int,Q:Int,
                                 Flayout:Layout[...] ,
                                 RhoLayout:Layout[...],
                                 VelocityLayout:Layout[...] ,
+                                config:LBM_Config = LBM_Config()
                                 ]
                                 (
                                     f:TileTensor[float_dtype,type_of(Flayout),MutAnyOrigin],
@@ -80,11 +82,13 @@ def calculate_rho_and_velocity[ float_dtype:DType,D:Int,Q:Int,
             else:
                 rho += f_lt[x,y,z,q][0]
                 u += f_lt[x,y,z,q][0]*lattice_model.float_directions[q]
+        
+        comptime if config.DDF_shift:
+            rho += 1
         u /= rho
 
         density_lt[x,y,z] = rho
         comptime for i in range(D):
-
             velocity_lt[i,x,y,z] = u[i]
 
 

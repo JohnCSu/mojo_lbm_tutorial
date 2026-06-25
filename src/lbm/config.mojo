@@ -1,8 +1,23 @@
-struct LBMConfig():
+
+comptime fp32 = DType.float32
+comptime uint16 = DType.uint16
+
+struct LBM_Config():
     var DDF_shift:Bool
     var LES:Bool
     var KBC:Bool
-    var use_float16C:Bool
+    var use_float16c:Bool
+    var f_dtype: Optional[DType]
+
+    # def __init__(out self,*,DDF_shift:Bool = False,use_float16c:Bool = False,f_dtype: Optional[DType] = None):
+    #     self.DDF_shift = DDF_shift
+        
+    #     # self.use_float16c = use_float16c
+    #     self.LES = False
+    #     self.KBC = False
+    #     self.use_float16c = use_float16c
+    #     self.f_dtype = Optional(DType.uint16) if use_float16c else f_dtype
+
     def __init__(out self):
         '''
         Default Settings
@@ -10,22 +25,28 @@ struct LBMConfig():
         self.DDF_shift = False
         self.LES = False
         self.KBC = False
-        self.use_float16C = False
+        self.use_float16c = False
+        self.f_dtype = None
+    @always_inline
+    def enable_float16c(mut self):
+        self.use_float16c = True
+        self.f_dtype = DType.uint16
+
+    def enable_DDF_shift(mut self):
+        self.DDF_shift = True
+
 
     @staticmethod
     @always_inline
-    def fp32_to_fp16c(val:Float32) -> UInt16:
+    def fp32_to_fp16c(val:Scalar[fp32]) -> Scalar[uint16]:
         return Float16C.to_fp16c(val)
 
     @staticmethod
     @always_inline
-    def fp16c_to_fp32(val:UInt16) -> Float32 :
+    def fp16c_to_fp32[dtype:DType](val:Scalar[dtype]) -> Scalar[fp32] where dtype == uint16: 
         return Float16C.to_fp32(val)
         
 
-
-comptime fp32 = DType.float32
-comptime uint16 = DType.uint16
 from std.memory import bitcast
 struct Float16C():
     '''
@@ -40,8 +61,8 @@ struct Float16C():
     '''
     @staticmethod
     @always_inline
-    def to_fp32(val:Scalar[uint16]) -> Scalar[fp32]:
-
+    def to_fp32[dtype:DType](val:Scalar[dtype]) -> Scalar[fp32]:
+        comptime assert dtype == uint16
         # Need to upscale first before doing the bitshifts (this is not clear in paper as upcasting is implicit and performed BEFORE the bitshift)
         e = UInt32((val & 0x7800)) >> 11 
         m = UInt32((val & 0x07FF)) << 12
@@ -56,7 +77,7 @@ struct Float16C():
 
     @staticmethod
     @always_inline
-    def to_fp16c(val:Float32) -> Scalar[uint16]:
+    def to_fp16c(val:Scalar[fp32]) -> Scalar[uint16]:
         '''
         Dont ask me how each op works see paper for reference
         '''

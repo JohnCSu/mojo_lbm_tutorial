@@ -5,15 +5,14 @@ from .flags import Flags,_FlagSet
 from std.collections import Set
 
 struct LBM_Config():
-    
     var DDF_shift:Bool
     var LES:Bool
     var KBC:Bool
     var use_float16c:Bool
     var f_dtype: Optional[DType]
-    var VALID_BOUNDARIES: Set[UInt8]
+    var INCLUDED_BCs: Set[UInt8]
 
-    def __init__(out self,*,valid_BC:Optional[Set[UInt8]] = None,DDF_shift:Bool = False,use_float16c:Bool = False,f_dtype: Optional[DType] = None):
+    def __init__(out self,*,BCs:Set[UInt8] = {},DDF_shift:Bool = False,use_float16c:Bool = False,f_dtype: Optional[DType] = None):
         self.DDF_shift = DDF_shift        
         # self.use_float16c = use_float16c
         self.LES = False
@@ -21,16 +20,14 @@ struct LBM_Config():
         self.use_float16c = use_float16c
         self.f_dtype = DType.uint16 if use_float16c else f_dtype
         
-        if valid_BC is None:
-            self.VALID_BOUNDARIES = {Flags.FLUID,Flags.SOLID}
+        if len(BCs) == 0:
+            self.INCLUDED_BCs = {Flags.FLUID,Flags.SOLID}
         else:
-            specified_bcs = valid_BC.value().copy()
             __valid_bcs = materialize[_FlagSet]()
-            if not specified_bcs.issubset(__valid_bcs):
-                print('Warning: Some Specified BC types are not standard: {}'.format(specified_bcs.difference(__valid_bcs)))
-
+            if not BCs.issubset(__valid_bcs):
+                print('Warning: Some Specified BC types are not standard: {}'.format(BCs.difference(__valid_bcs)))
             # Ensure that fluid and solid nodes are always in the valid BC
-            self.VALID_BOUNDARIES = {Flags.FLUID,Flags.SOLID}.union(specified_bcs) 
+            self.INCLUDED_BCs = {Flags.FLUID,Flags.SOLID}.union(BCs) 
         
 
 

@@ -6,7 +6,7 @@ from std.collections import InlineArray
 from std.memory import Pointer
 from std.collections import Set,Dict
 from src.utils import Vector,ContextTileTensor
-
+from std.utils.numerics import nan,isnan
 
 def set_block_shape_and_grid_dim[nx:Int,ny:Int,nz:Int,D:Int,tile_size:Int]() -> Tuple[Tuple[Int,Int,Int],Tuple[Int,Int,Int]]:
     comptime assert (nx % tile_size == 0 or nx == 1) and (ny % tile_size == 0 or ny == 1) and (nz % tile_size == 0 or nz == 1), 'Tile size must divide nx,ny and nz'
@@ -79,6 +79,8 @@ struct LBM_Grid[float_dtype:DType,int_dtype:DType,D:Int,Q:Int,//,
              
 
 
+
+@deprecated(use = set_exterior_walls)
 def set_outer_walls[float_dtype:DType,
                     flag_origin:Origin[mut=True],
                     bc_origin:Origin[mut=True],
@@ -123,6 +125,93 @@ def set_outer_walls[float_dtype:DType,
     axis = axes[String(side[byte = 1])]
     
     # Layout independent
+    end_values = [nx,ny,nz]
+    
+    if side[byte = 0] == '-':
+        fixed = 0
+    else:
+        fixed = end_values[axis] - 1
+    if axis == 0: # X-axis, fix x and loop
+        x = fixed
+        for y in range(ny):
+            for z in range(nz):
+                flags.store(coord[DType.int32]((x,y,z)),flags.ElementType(boundary_type))
+                # flags_lt[fixed,y,z] = flags.ElementType(boundary_type)
+                comptime for i in range(D):
+                    bc.store(coord[DType.int32]((x,y,z,i)),velocity[i]) 
+                bc.store(coord[DType.int32]((x,y,z,D)),density) 
+    elif axis == 1:
+        y = fixed
+        for x in range(nx):
+            for z in range(nz):
+                flags.store(coord[DType.int32]((x,y,z)),flags.ElementType(boundary_type))
+                comptime for i in range(D):
+                    bc.store(coord[DType.int32]((x,y,z,i)),velocity[i]) 
+                bc.store(coord[DType.int32]((x,y,z,D)),density)
+    else: # Loop Z-face
+        z = fixed
+        for x in range(nx):
+            for y in range(ny):
+                flags.store(coord[DType.int32]((x,y,z)),flags.ElementType(boundary_type))
+                comptime for i in range(D):
+                    bc.store(coord[DType.int32]((x,y,z,i)),velocity[i]) 
+                bc.store(coord[DType.int32]((x,y,z,D)),density)
+
+
+def set_exterior_walls[float_dtype:DType,
+                    flag_origin:Origin[mut=True],
+                    bc_origin:Origin[mut=True],
+                    nx:Int,ny:Int,nz:Int,
+                    D:Int,Q:Int,
+                    latticeModel:LatticeModel[D,Q,float_dtype,DType.int32],
+                    tile_size:Int,
+                    FlagLayoutType:TensorLayout,
+                    BCLayoutType:TensorLayout,
+                    //,
+                    grid:LBM_Grid[latticeModel,nx,ny,nz,tile_size],
+                    config:LBM_Config = LBM_Config()
+                    ]
+                    (flags:TileTensor[DType.uint8,FlagLayoutType,flag_origin],
+                            bc:TileTensor[float_dtype,BCLayoutType,bc_origin],
+                            side:String,
+                            boundary_type:Scalar[DType.uint8],
+                            u:List[Scalar[float_dtype]] = [],
+                            rho:Scalar[float_dtype] = nan[float_dtype]() ) raises:
+    '''
+    Apply Boundary conditions to exterior walls
+    '''
+    comptime assert float_dtype.is_floating_point()
+    comptime assert FlagLayoutType.rank == 3 and BCLayoutType.rank == 4
+    
+    VALID_BOUNDARIES = materialize[config.INCLUDED_BCs]()
+    
+    axes:Dict[String,Int] = {'X':0,
+                    'Y':1,
+                    'Z':2,}
+    valid_strings:Set[String] = {'-X','+X','-Y','+Y','-Z','+Z'}
+
+    u_is_empty = (len(u) == 0)
+    # print(u_is_empty)
+    # Error Checking
+    if u_is_empty and isnan(rho):
+        raise Error('Either velocity or density or both have to be specified. Both cant be left as None')
+    
+    velocity = [nan[float_dtype]() for _ in range(D)] if u_is_empty else u.copy()
+    density:Scalar[float_dtype] = rho
+
+    if (boundary_type ==  SOLID_NODE) and (u_is_empty or isnan(rho)):
+        raise Error('For Solid Type you must specify both u and rho')
+
+    if len(velocity) != D:
+        raise Error('Input velocity list was of length {} but Grid is {} Dimensional'.format(len(velocity),D))
+
+    if boundary_type not in VALID_BOUNDARIES:
+        raise Error('Input Boundary Type was {} but valid boundary types are: {}'.format(boundary_type,VALID_BOUNDARIES))
+
+    if side not in valid_strings:
+        raise Error('Side not valid. Input was {} but expects {}'.format(side,valid_strings))
+    
+    axis = axes[String(side[byte = 1])]
     end_values = [nx,ny,nz]
     
     if side[byte = 0] == '-':

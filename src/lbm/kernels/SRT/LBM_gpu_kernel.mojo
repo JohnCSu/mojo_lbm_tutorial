@@ -4,10 +4,10 @@ from layout.tile_tensor import stack_allocation
 from layout.tile_layout import Layout,row_major,Coord,TensorLayout
 from std.gpu.memory import AddressSpace
 from src.lbm import LBM_Grid,LBM_Config,LatticeModel
-from src.lbm.flags import SOLID_NODE,FLUID_NODE
+from src.lbm.flags import SOLID_NODE,FLUID_NODE,Flags
 from src.utils import Vector,ContextTileTensor
 from .load_and_store import load_f,store_f
-
+from std.utils.numerics import nan,isnan
 
 def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
                 lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
@@ -53,49 +53,101 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
     y = block_y*block_dim_y + local_y
     z = block_z*block_dim_z + local_z
     
-    index:InlineArray[Int,3] = [x,y,z]    
-
+    var index:InlineArray[Int,3] = [x,y,z]    
+    var pull_flags = InlineArray[UInt8,Q](uninitialized = True)
+    var pull_indices = InlineArray[InlineArray[Int,3],Q](uninitialized = True)
     # Main Compute
     if (index[0] < grid_shape[0]) and (index[1] < grid_shape[1]) and (index[2] < grid_shape[2]): # Basic Guard
         var f_new = Vector[float_dtype,Q](fill = 0.)
         var velocity = Vector[float_dtype,D](uninitialized = True)
         var rho:Scalar[float_dtype] = 0
-
+        
         # Streaming Step
         comptime for q in range(Q):
             direction = directions[q]
-            pull_index = get_adjacent_idx[D,-1](index,grid_shape,direction) # Pulling Scheme
-            pulled_f = load_f_from_xyzq(f_in,pull_index,q)
-            f_new[q] = pulled_f
-
-            # BC Step
-            pulled_flag = flags.load(coord[DType.uint32]((pull_index[0],pull_index[1],pull_index[2])))[0]
-            if pulled_flag == SOLID_NODE:
-                opp_q = Int(opposite_index[q])
-                f_opp = load_f_from_xyzq(f_in,index,opp_q)
+            pull_indices[q] = get_adjacent_idx[D,-1](index,grid_shape,direction) # Pulling Scheme
+            pull_flags[q] = flags.load(coord[DType.uint32]((pull_indices[q][0],pull_indices[q][1],pull_indices[q][2])))[0]
+            f_new[q] =  load_f_from_xyzq(f_in,pull_indices[q],q)
+        
+        # Bounce Back
+        comptime for q in range(Q):
+            if pull_flags[q] == SOLID_NODE:
+                opp_q = Int(opposite_index[q]) 
                 comptime for ii in range(D):
-                    velocity[ii] = bc.load(coord[DType.uint32]((pull_index[0],pull_index[1],pull_index[2],ii)))[0]
-                rho = bc.load(coord[DType.uint32]((pull_index[0],pull_index[1],pull_index[2],D)))[0]
-                f_new[q] = (f_opp) + 2.*3.*weights[q]*rho*(float_directions[q].dot(velocity))
+                    velocity[ii] = bc.load(coord[DType.uint32]((pull_indices[q][0],pull_indices[q][1],pull_indices[q][2],ii)))[0]
+                rho = bc.load(coord[DType.uint32]((pull_indices[q][0],pull_indices[q][1],pull_indices[q][2],D)))[0]
+                # Bounceback is always included
+                f_new[q] = load_f_from_xyzq(f_in,index,opp_q) + 2.*3.*weights[q]*rho*(float_directions[q].dot(velocity))
+        
+        # Equilibrium BC
+        comptime if Flags.EQUILIBRIUM in config.INCLUDED_BCs:
+            if flags.load(coord[DType.uint32]((x,y,z)))[0] == Flags.EQUILIBRIUM:
+                comptime for ii in range(D):
+                    velocity[ii] = bc.load(coord[DType.uint32]((x,y,z,ii)))[0]
+                rho = bc.load(coord[DType.uint32]((x,y,z,D)))[0]
+
+                rho_local,u_l = get_eq_density_and_velocity[config.DDF_shift](f_new,float_directions,weights,index,pull_indices)
                 
+                u_local = u_l if isnan(velocity[0]) else velocity # nan means the vel is free
+                rho_local = rho_local if isnan(rho) else rho # Nan means density is free
+                u_dot_u = u_local.dot(u_local)
+                comptime for q in range(Q):
+                    f_eq = SRT[config.DDF_shift](weights[q],rho_local,u_local,u_dot_u,float_directions[q])
+                    f_new[q] = f_eq 
+
         # Get Velocity and Density
         velocity.fill(0)
         rho = 0
         comptime for q in range(Q):    
             rho += f_new[q]
             velocity += f_new[q]*float_directions[q]
-
         comptime if config.DDF_shift:
             rho += 1
-
         velocity /= rho
 
         # Collision Term
         u_dot_u = velocity.dot(velocity)
         comptime for q in range(Q):
             f_eq = SRT[config.DDF_shift](weights[q],rho,velocity,u_dot_u,float_directions[q])
-            f_next = (f_new[q] -  inv_tau*(f_new[q]- f_eq)) # fp
-            store_f[config.use_float16c](f_out,f_next,index,q)
+            store_f[config.use_float16c](f_out,(f_new[q] -  inv_tau*(f_new[q]- f_eq)),index,q)
+
+
+
+@always_inline
+def get_eq_density_and_velocity[
+    float_dtype:DType,D:Int,Q:Int,//,
+    DDF_shift:Bool = False]
+    (
+        f_vec:Vector[float_dtype,Q],
+        float_directions:InlineArray[Vector[float_dtype,D],Q],
+        weights:Vector[float_dtype,Q],
+        index:InlineArray[Int,3],
+        pull_indices:InlineArray[InlineArray[Int,3],Q]) 
+    -> Tuple[Scalar[float_dtype],Vector[float_dtype,D]]:
+
+    var velocity = Vector[float_dtype,D](fill = 0.)
+    var rho:Scalar[float_dtype] = 0
+
+    comptime for q in range(Q):
+        comptime if DDF_shift:
+            rest_f:Scalar[float_dtype] = 0.
+        else:
+            rest_f = weights[q]
+            
+        is_oob = False
+        comptime for i in range(3):
+            # So if any of the indices wraps is_oob is always trye
+            is_oob = ((abs(pull_indices[q][i] - index[i]) > 1) or is_oob) 
+
+        # We set unknown fs (i.e from out of bounds/wrapped around fs) to rest value
+        fq = rest_f if is_oob else f_vec[q]
+        rho += fq
+        velocity += fq*float_directions[q]
+
+    comptime if DDF_shift:
+        rho += 1
+    velocity /= rho
+    return rho,velocity
 
 
 @always_inline

@@ -28,8 +28,7 @@ comptime (nx,ny,nz) = (2*N,N,1)
 comptime tile_size = 16
 comptime grid = LBM_Grid[D2Q9,nx,ny,nz,tile_size](dx)
 comptime valid_bcs = {Flags.EQUILIBRIUM}
-comptime config = LBM_Config(valid_BC = valid_bcs,DDF_shift = False)
-
+comptime config = LBM_Config(BCs = valid_bcs,DDF_shift = False)
 
 comptime BLOCK_SHAPE = grid.BLOCK_SHAPE
 comptime GRID_DIM = grid.GRID_DIM
@@ -163,7 +162,7 @@ def main() raises:
     pv_mesh.point_data['V velocity'] = v_plot.ravel()
     
     plotter = pv.Plotter()
-    plotter.add_mesh(pv_mesh,scalars ='U velocity',show_edges = False, cmap= 'jet',clim = [0,1.5],nan_color='white',)
+    plotter.add_mesh(pv_mesh,scalars ='U_mag',show_edges = False, cmap= 'jet',clim = [0,1],nan_color='white',)
     plotter.view_xy()
     plotter.show_axes()
     plotter.show() # screenshot = 'LDC_Re100.png'

@@ -1,0 +1,173 @@
+from std.gpu.host import DeviceContext
+from layout import TileTensor,coord
+from layout.tile_layout import Layout,row_major,TensorLayout,blocked_product,col_major
+from std.python import Python, PythonObject
+from std.collections import InlineArray
+from src.lbm import (
+                    Flags,SOLID_NODE,FLUID_NODE,
+                    LBM_Grid,LBM_Config,
+                    get_D2Q9,set_exterior_walls,calculate_rho_and_velocity)
+
+from src.lbm.kernels.SRT import LBM_kernel
+from src.utils import Vector,ContextTileTensor
+from src.lbm.geometry.primatives import add_sphere
+
+comptime float_dtype = DType.float32
+comptime int_dtype = DType.int32
+comptime float_scalar = Scalar[float_dtype]
+comptime D2Q9 = get_D2Q9()
+comptime D,Q = (2,9)
+comptime N = 256
+comptime L = 1.
+comptime dx = L/float_scalar(N-1)
+comptime (nx,ny,nz) = (2*N,N,1)
+comptime tile_size = 1
+comptime grid = LBM_Grid[D2Q9,nx,ny,nz,tile_size](dx,[0.,0.,0.])
+comptime valid_bcs = {Flags.EQUILIBRIUM}
+comptime config = LBM_Config(BCs = valid_bcs,DDF_shift = False)
+
+comptime BLOCK_SHAPE = grid.BLOCK_SHAPE
+comptime GRID_DIM = grid.GRID_DIM
+
+comptime simd_width = 4
+comptime flag_tile = col_major[tile_size,tile_size,1]()
+comptime f_tile = col_major[tile_size,tile_size,1,Q]()
+comptime bc_tile = col_major[tile_size,tile_size,1,D+1]()
+
+comptime flag_tiler = col_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z]()
+comptime f_tiler = col_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z,1]()
+comptime bc_tiler = col_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z,1]()
+
+# comptime flag_layout = blocked_product(flag_tile,flag_tiler)
+comptime flag_layout = col_major[grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z]()
+comptime f_layout = blocked_product(f_tile,f_tiler)
+comptime bc_layout = blocked_product(bc_tile,bc_tiler)
+
+comptime density_layout = row_major[nx,ny,nz]()
+comptime velocity_layout = row_major[D,nx,ny,nz]()
+
+
+comptime all_slice = slice(None,None,None)
+
+def main() raises:
+    comptime assert N % tile_size == 0 , 'tile_size must divide N'
+    print(grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z)
+    print('Grid Dim: ',GRID_DIM)
+    print('BLOCK_SHAPE: ', BLOCK_SHAPE)
+    assert N % tile_size == 0, 'Tile Size must Divide N' 
+    print(grid.n_tiles_x,grid.n_tiles_y,grid.n_tiles_z)
+
+    U_phs:float_scalar = 1.
+    U:float_scalar = 0.1
+    viscosity:float_scalar = 1/100.
+    dt = dx*U/U_phs 
+    Re = 1/viscosity
+    L_lat:float_scalar = N
+    v_lat = U*L_lat/Re
+    tau = v_lat/(1/3.) +0.5
+    print('Tau {}'.format(tau))
+
+    ctx = DeviceContext()
+    
+    flags = ContextTileTensor[DType.uint8](ctx,flag_layout)
+    bc = ContextTileTensor[float_dtype](ctx,bc_layout)
+    f = ContextTileTensor[float_dtype](ctx,f_layout)
+    f_out = ContextTileTensor[float_dtype](ctx,f_layout)
+
+    u = ContextTileTensor[float_dtype](ctx,velocity_layout)
+    rho = ContextTileTensor[float_dtype](ctx,density_layout)
+
+    # Set up
+    comptime if not config.DDF_shift:
+        f.fill(1./Float32(Q))
+        f_out.fill(1./Float32(Q))
+    else:
+        f.fill(0.)
+        f_out.fill(0.)
+
+    add_sphere[grid](flags.cpu(),center = [0.75,0.5,0.],radius = 0.1)
+    
+    # flag_np = flags.buffer_to_numpy().reshape(nx,ny)
+    # pv = Python.import_module('pyvista')
+    # np = Python.import_module('numpy')
+    # x = np.linspace(0, grid.domain_size[0], nx)
+    # y = np.linspace(0, grid.domain_size[1], ny)
+    # m = np.meshgrid(x, y,indexing = 'ij')
+    # xx,yy = m[0],m[1]
+    # pv_mesh = pv.StructuredGrid(xx, yy, np.zeros_like(xx))
+    # pv_mesh.point_data['Flags'] = flag_np.ravel()
+    # plotter = pv.Plotter()
+    # plotter.add_mesh(pv_mesh,scalars ='Flags',show_edges = False, cmap= 'jet',clim = [0,1],nan_color='white',)
+    # plotter.view_xy()
+    # plotter.show_axes()
+    # plotter.show()
+
+    set_exterior_walls[grid,config](flags.cpu(),bc.cpu(),'+X',Flags.EQUILIBRIUM,[],1.)
+    set_exterior_walls[grid,config](flags.cpu(),bc.cpu(),'-X',Flags.EQUILIBRIUM,[U,0],1.)
+    set_exterior_walls[grid,config](flags.cpu(),bc.cpu(),'+Y',SOLID_NODE,[0,0],1.)
+    set_exterior_walls[grid,config](flags.cpu(),bc.cpu(),'-Y',SOLID_NODE,[0,0],1.)
+    
+    ctx.synchronize()
+    # Copy To GPU()
+    _ = flags.gpu()
+    _ = bc.gpu()
+    _ = f.gpu()
+    _ = f_out.gpu()
+
+    ctx.synchronize()
+    #Compile Functions
+    comptime LBM_ = LBM_kernel[grid,f_layout,bc_layout,flag_layout,config]
+    LBM_func = ctx.compile_function[LBM_,LBM_]()
+
+    comptime get_u_and_rho = calculate_rho_and_velocity[grid,f_layout,density_layout,velocity_layout,config]
+    calc_rho_and_u_gpu = ctx.compile_function[get_u_and_rho,get_u_and_rho]()
+ 
+    ctx.synchronize()
+    comptime MAX_ITERS = 10_000
+    # Run Simulation
+    for t in range(MAX_ITERS):
+        ctx.enqueue_function(LBM_func,f_out.gpu(),f.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),1/tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
+        ctx.enqueue_function(LBM_func,f.gpu(),f_out.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),1/tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
+        if (t % (MAX_ITERS//10)) == 0 :
+            # pass
+            ctx.synchronize()
+            ctx.enqueue_function(calc_rho_and_u_gpu,f.gpu(),rho.gpu(),u.gpu(),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
+            ctx.synchronize()
+            u_np = u.buffer_to_numpy()/U
+            print('step = {} max ={} avg = {}'.format(t,u_np.max(),u_np.mean()))
+    ctx.synchronize()
+    # Get Final U and rho
+    ctx.enqueue_function(calc_rho_and_u_gpu,f.gpu(),rho.gpu(),u.gpu(),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
+    ctx.synchronize()
+    # return None
+    np = Python.import_module('numpy')
+    pd = Python.import_module('pandas')
+    pv = Python.import_module('pyvista')
+    plt = Python.import_module('matplotlib.pyplot')
+    ctypes = Python.import_module("ctypes")
+
+    u_np = (u.buffer_to_numpy()/U).reshape(D,nx,ny,nz)
+    print('step = {} max ={} avg = {}'.format(0,u_np.max(),u_np.mean()) )
+
+    x = np.linspace(0, grid.domain_size[0], nx)
+    y = np.linspace(0, grid.domain_size[1], ny)
+    m = np.meshgrid(x, y,indexing = 'ij')
+    xx,yy = m[0],m[1]
+    pv_mesh = pv.StructuredGrid(xx, yy, np.zeros_like(xx))
+    print(pv_mesh)
+    
+
+    u_plot = u_np[0,all_slice,all_slice,all_slice].T
+    v_plot = u_np[1,all_slice,all_slice,all_slice].T
+
+    u_mag = np.sqrt(u_plot**2 + v_plot**2)
+    pv_mesh.point_data['U_mag'] = u_mag.ravel()
+    pv_mesh.point_data['U velocity'] = u_plot.ravel()
+    pv_mesh.point_data['V velocity'] = v_plot.ravel()
+    
+    plotter = pv.Plotter()
+    plotter.add_mesh(pv_mesh,scalars ='U_mag',show_edges = False, cmap= 'jet',clim = [0,1],nan_color='white',)
+    plotter.view_xy()
+    plotter.show_axes()
+    plotter.show() # screenshot = 'LDC_Re100.png'
+   

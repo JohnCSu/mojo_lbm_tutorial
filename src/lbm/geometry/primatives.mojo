@@ -83,5 +83,48 @@ def add_box[
     FlagLayoutType:TensorLayout,
     //,
     grid:LBM_Grid[latticeModel,nx,ny,nz,tile_size]]
-    (flags:TileTensor[DType.uint8,FlagLayoutType,flag_origin],center:List[Scalar[float_dtype]],radius:Scalar[float_dtype]) raises:
-    pass
+    (flags:TileTensor[DType.uint8,FlagLayoutType,flag_origin],center:List[Scalar[float_dtype]],box_radius:List[Scalar[float_dtype]]) raises:
+    comptime assert FlagLayoutType.rank == 3
+    if len(center) != 3:
+        raise Error('centre must be a list of 3 floats got a len of {} instead'.format(len(center)))
+
+    if len(box_radius) != 3:
+        raise Error('lengths must be a list of 3 floats got a len of {} instead'.format(len(box_radius)))
+    # b:Tuple[Int,Int,Int] = (0,0,0)
+    var bounding_box:List[List[Int]] = []
+    
+
+    for i in range(3):
+        if i < D:
+            a_min,a_max = center[i] - box_radius[i], center[i] + box_radius[i]
+            n_min,n_max = max(0,Int((a_min-grid.origin[i])//grid.dx)), min(grid.shape[i],Int((a_max-grid.origin[i])//grid.dx + 1))
+            bounding_box.append([n_min,n_max])
+        else:
+            bounding_box.append([0,1]) # This means loop is just set to 0 index
+
+    # bounding_box.append([0,nx])
+    # bounding_box.append([0,ny])
+    # bounding_box.append([0,nz])
+    comptime vec3 = Vector[float_dtype,3]
+    comptime vec3_bool = Vector[float_dtype,3]
+    comptime float = Scalar[float_dtype]
+    var center_vec = vec3(center)
+    var coord_vec = vec3(fill=0.)
+    var box_radius_vec = vec3_bool(box_radius)
+
+    for nx in range(bounding_box[0][0],bounding_box[0][1]):
+        for ny in range(bounding_box[1][0],bounding_box[1][1]):
+            for nz in range(bounding_box[2][0],bounding_box[2][1]):
+                dx,dy,dz = (float(nx)*grid.dx,float(ny)*grid.dx,float(nz)*grid.dx)
+                coord_vec[0] = dx + grid.origin[0]
+                coord_vec[1] = dy + grid.origin[1]
+                coord_vec[2] = dz + grid.origin[2]
+                if check_box_axis(coord_vec,center_vec,box_radius_vec):
+                    flags.store(coord[DType.int32]((nx,ny,nz)),value = Flags.SOLID) 
+
+
+def check_box_axis[float_dtype:DType,//](point:Vector[float_dtype,3],center:Vector[float_dtype,3],box_radius:Vector[float_dtype,3]) -> Bool:
+    if (center-box_radius <= point).all_true() and (point <= (center + box_radius)).all_true():
+        return True
+    else:
+        return False

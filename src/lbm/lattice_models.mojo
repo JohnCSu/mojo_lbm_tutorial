@@ -26,7 +26,7 @@ struct LatticeModel[D:Int,Q:Int,float_dtype:DType,int_dtype:DType](ImplicitlyCop
             for j in range(Self.D):
                 opp_direction[j] = opp_direction[j]*(-1)
             for k in range(Self.Q):
-                if opp_direction == self.directions[k]:
+                if (self.directions[k] == opp_direction).all_true():
                     self.opposite_indices[i] = self.int_scalar(k)
                     break
 

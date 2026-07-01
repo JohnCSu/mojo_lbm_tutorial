@@ -31,7 +31,6 @@ comptime config = LBM_Config(BCs = valid_bcs,DDF_shift = False)
 comptime BLOCK_SHAPE = grid.BLOCK_SHAPE
 comptime GRID_DIM = grid.GRID_DIM
 
-comptime simd_width = 4
 comptime flag_tile = col_major[tile_size,tile_size,1]()
 comptime f_tile = col_major[tile_size,tile_size,1,Q]()
 comptime bc_tile = col_major[tile_size,tile_size,1,D+1]()
@@ -61,17 +60,13 @@ def main() raises:
 
     U_phs:float_scalar = 1.
     U:float_scalar = 0.1
-    viscosity:float_scalar = 1/100.
-    dt = dx*U/U_phs 
-    Re = U_phs*dx/viscosity
-    L_lat:float_scalar = 1
-    v_lat = U*L_lat/Re
-    tau = v_lat/(1/3.) +0.5
-    print('Tau {}'.format(tau))
+    radius:float_scalar = 0.1
 
-    units = UnitSystem(U_phs,U,grid.dx,1,viscosity,1.)
-
-    print('Units Tau',units.tau)
+    # units = UnitSystem(U_phs,U,radius,radius/dx,1.,Re = 100.)
+    units = grid.get_UnitSystem_with_Re(U_phs,U,radius,Re=100.)
+    tau = units.tau
+    dt = units.dt
+    print(units.tau,units.Re, units.kinematic_viscosity)
 
     ctx = DeviceContext()
     
@@ -84,7 +79,6 @@ def main() raises:
     rho = ContextTileTensor[float_dtype](ctx,density_layout)
     pv_view = pyvista_viewer_import()
 
-
     # Set up
     comptime if not config.DDF_shift:
         f.fill(1./Float32(Q)) # Should be initialising with respective weight for each dist but should be ok as IC is fluid at rest
@@ -93,16 +87,8 @@ def main() raises:
         f.fill(0.)
         f_out.fill(0.)
 
-    # add_sphere[grid](flags.cpu(),center = [0.75,0.5,0.],radius = 0.1)
-    add_box[grid](flags.cpu(),center = [0.75,0.5,0.],box_radius = [0.1,0.1,0])
-
-    flag_np = flags.buffer_to_numpy().reshape(nx,ny)
-
-    visualizer = grid_viewer[grid](subplot_shape= (1,1))
-    visualizer.add_point_data(flags=flag_np.ravel())
-    visualizer.set_mesh_display('flags')
-    visualizer.show()
-
+    add_sphere[grid](flags.cpu(),center = [0.75,0.5,0.],radius = 0.1)
+    # add_box[grid](flags.cpu(),center = [0.75,0.5,0.],box_radius = [0.1,0.1,0])
     set_exterior_walls[grid,config](flags.cpu(),bc.cpu(),'+X',Flags.EQUILIBRIUM,[],1.)
     set_exterior_walls[grid,config](flags.cpu(),bc.cpu(),'-X',Flags.EQUILIBRIUM,[U,0],1.)
     set_exterior_walls[grid,config](flags.cpu(),bc.cpu(),'+Y',SOLID_NODE,[0,0],1.)
@@ -115,7 +101,6 @@ def main() raises:
     _ = f.gpu()
     _ = f_out.gpu()
 
-    ctx.synchronize()
     #Compile Functions
     comptime LBM_ = LBM_kernel[grid,f_layout,bc_layout,flag_layout,config]
     LBM_func = ctx.compile_function[LBM_,LBM_]()
@@ -124,39 +109,63 @@ def main() raises:
     calc_rho_and_u_gpu = ctx.compile_function[get_u_and_rho,get_u_and_rho]()
 
     ctx.synchronize()
-    comptime MAX_ITERS = 10_000
-    # Run Simulation
-    for t in range(MAX_ITERS):
-        ctx.enqueue_function(LBM_func,f_out.gpu(),f.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
-        ctx.enqueue_function(LBM_func,f.gpu(),f_out.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
-        if (t % (MAX_ITERS//10)) == 0:
-            ctx.synchronize()
-            ctx.enqueue_function(calc_rho_and_u_gpu,f.gpu(),rho.gpu(),u.gpu(),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
-            ctx.synchronize()
-            u_np = u.buffer_to_numpy()/U
-            print('step = {}, time = {} max ={} avg = {}'.format(t,t*dt,u_np.max(),u_np.mean()))
-    ctx.synchronize()
-    # Get Final U and rho
-    ctx.enqueue_function(calc_rho_and_u_gpu,f.gpu(),rho.gpu(),u.gpu(),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
-    ctx.synchronize()
-    # return None
-    
-    np = Python.import_module('numpy')
-    pd = Python.import_module('pandas')
-    pv = Python.import_module('pyvista')
-    plt = Python.import_module('matplotlib.pyplot')
 
+
+    # Animation Code
+    np = Python.import_module('numpy')
     u_np = (u.buffer_to_numpy()/U).reshape(D,nx,ny,nz)
     pv_mesh = grid_viewer[grid](subplot_shape= (1,1))
     
     u_plot = u_np[0,all_slice,all_slice,all_slice].T
     v_plot = u_np[1,all_slice,all_slice,all_slice].T
-
     u_mag = np.sqrt(u_plot**2 + v_plot**2)
     pv_mesh.point_data['U_mag'] = u_mag.ravel()
     pv_mesh.point_data['U velocity'] = u_plot.ravel()
     pv_mesh.point_data['V velocity'] = v_plot.ravel()
     
     pv_mesh.set_mesh_display('U_mag',clim = [0,1.5],cmap ='jet')
-    pv_mesh.show()
+
+    pv_mesh.set_animation('Cylinder.gif')
+    # pv_mesh.show()
+   
+    comptime MAX_ITERS = 100_000
+    # Run Simulation
+    for t in range(MAX_ITERS):
+        ctx.enqueue_function(LBM_func,f_out.gpu(),f.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
+        ctx.enqueue_function(LBM_func,f.gpu(),f_out.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
+        if (t % (MAX_ITERS//100)) == 0:
+            ctx.synchronize()
+            ctx.enqueue_function(calc_rho_and_u_gpu,f.gpu(),rho.gpu(),u.gpu(),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
+            ctx.synchronize()
+            u_np = (u.buffer_to_numpy()/U).reshape(D,nx,ny,nz)
+            print('step = {}, time = {} max ={} avg = {}'.format(t,2.*Scalar[float_dtype](t)*dt,u_np.max(),u_np.mean()))
+            u_plot = u_np[0,all_slice,all_slice,all_slice].T
+            v_plot = u_np[1,all_slice,all_slice,all_slice].T
+            u_mag = np.sqrt(u_plot**2 + v_plot**2)
+            pv_mesh.point_data['U_mag'] = u_mag.ravel()
+            pv_mesh.point_data['U velocity'] = u_plot.ravel()
+            pv_mesh.point_data['V velocity'] = v_plot.ravel()
+            pv_mesh.update_frame()
+            ctx.synchronize()
+
+    ctx.synchronize()
+    # Get Final U and rho
+    ctx.enqueue_function(calc_rho_and_u_gpu,f.gpu(),rho.gpu(),u.gpu(),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
+    ctx.synchronize()
+    
+
+    pv_mesh.close()
+    # u_np = (u.buffer_to_numpy()/U).reshape(D,nx,ny,nz)
+    # # pv_mesh = grid_viewer[grid](subplot_shape= (1,1))
+    
+    # u_plot = u_np[0,all_slice,all_slice,all_slice].T
+    # v_plot = u_np[1,all_slice,all_slice,all_slice].T
+
+    # u_mag = np.sqrt(u_plot**2 + v_plot**2)
+    # pv_mesh.point_data['U_mag'] = u_mag.ravel()
+    # pv_mesh.point_data['U velocity'] = u_plot.ravel()
+    # pv_mesh.point_data['V velocity'] = v_plot.ravel()
+    
+    # pv_mesh.set_mesh_display('U_mag',clim = [0,1.5],cmap ='jet')
+    # pv_mesh.show()
    

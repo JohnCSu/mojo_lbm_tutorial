@@ -4,10 +4,11 @@ from layout.tile_tensor import stack_allocation
 from layout.tile_layout import Layout,row_major,Coord,TensorLayout
 from std.gpu.memory import AddressSpace
 from src.lbm import LBM_Grid,LBM_Config,LatticeModel
-from src.lbm.flags import SOLID_NODE,FLUID_NODE,Flags
+from src.lbm.flags import SOLID_NODE,FLUID_NODE,Flags,cs_squared
 from src.utils import Vector,ContextTileTensor
 from .load_and_store import load_f,store_f
 from std.utils.numerics import nan,isnan
+
 
 def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
                 lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
@@ -40,7 +41,7 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
     comptime opposite_index = lattice_model.opposite_indices
     comptime grid_shape:InlineArray[Int,3] = [nx,ny,nz]
     comptime load_f_from_xyzq = load_f[float_dtype,config.use_float16c]
-
+    comptime stress_indices = lattice_model.stress_indices
     # Comptime asserts
     comptime assert not directions[0].all_true(), 'The first direction for the lattice model should be all 0s i.e directions[0]=[0,0,0]'
 
@@ -112,9 +113,24 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
 
         # Collision Term
         u_dot_u = velocity.dot(velocity)
+
+        inv_tau = 1./tau # This is faster by 0.4 ms on the 256^3 benchmark
         comptime for q in range(Q):
             f_eq = SRT[config.DDF_shift](weights[q],rho,velocity,u_dot_u,float_directions[q])
-            store_f[config.use_float16c](f_out,(f_new[q] -  (f_new[q]- f_eq)/tau ),index,q)
+            store_f[config.use_float16c](f_out,(f_new[q] -  inv_tau*(f_new[q]- f_eq) ),index,q)
+
+
+def get_second_velocity_moment[float_dtype:DType,int_dtype:DType,D:Int,Q:Int,//,
+    DDF_shift:Bool = False]
+    (
+        f_vec:Vector[float_dtype,Q],
+        float_directions:InlineArray[Vector[float_dtype,D],Q],
+        weights:Vector[float_dtype,Q],
+        stress_indices:InlineArray[InlineArray[Scalar[int_dtype],2],D*(D+1)//2],
+        index:InlineArray[Int,3],
+    ):
+    pass
+    
 
 
 

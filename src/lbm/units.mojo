@@ -61,8 +61,8 @@ struct UnitSystem[float_dtype:DType](ImplicitlyCopyable & Writable):
         u_lattice:Self.Float_Scalar,
         L_physical:Self.Float_Scalar,
         L_lattice:Self.Float_Scalar,
-        kinematic_viscosity:Self.Float_Scalar, # L/T**2
         density:Self.Float_Scalar, # M/L**3
+        kinematic_viscosity:Self.Float_Scalar, # L/T**2
         ):
         """
         Create the Unit System fot the LBM model.
@@ -70,21 +70,21 @@ struct UnitSystem[float_dtype:DType](ImplicitlyCopyable & Writable):
         Args:
             u_physical: Physical U scale. typically one chooses the free stream velocity/inlet velocity.
             u_lattice: Lattice velocity. User is free to choose this for LBM. Standard range is [0.001,0.1].
-            L_physical: Physical Length Scale. This is converted to the grid size
+            L_physical: Physical Length Scale.
             L_lattice: Lattice Length Scale. This should be the approximate number 
                 of lattice points along a direction that represents L_physical in the grid.
-            kinematic_viscosity: Equivalent to dynamic_viscosity/density.
             density: Density of actual fluid. Does not influence the physics of the flow.
                 Used for Unit conversion only.
+            kinematic_viscosity: Equivalent to dynamic_viscosity/density.
         """
         
         self.U = Self.Unit_(u_physical,u_lattice)
-        self.L = Self.Unit_(L_physical/L_lattice,1.)
+        self.L = Self.Unit_(L_physical,L_lattice)
         self.t = Self.Unit_((L_physical/u_physical)/(L_lattice/u_lattice),1.)
         self.density = Self.Unit_(density,1.)
         
-        self.Re = (u_physical*L_physical)/kinematic_viscosity
-        v_lat = u_lattice*L_lattice/self.Re
+        self.Re = (self.U.physical*self.L.physical)/kinematic_viscosity
+        v_lat = self.U.lattice*self.L.lattice/self.Re
 
         self.dt = self.t.physical
         self.tau = v_lat/(1/3.) +0.5
@@ -97,15 +97,28 @@ struct UnitSystem[float_dtype:DType](ImplicitlyCopyable & Writable):
         self.Pressure = Self.Unit_(self.Force.C_lat_to_phys()/self.L.C_lat_to_phys()**2,1.) # Unit Pressure
 
 
-    # def __init__(
-    #     out self,
-    #     u_physical:Self.Float_Scalar,
-    #     u_lattice:Self.Float_Scalar,
-    #     L_physical:Self.Float_Scalar,
-    #     L_lattice:Self.Float_Scalar,
-    #     *,
-    #     dynamic_viscosity:Self.Float_Scalar,
-    #     density:Self.Float_Scalar,
-    #     ):
-    #     kinematic_viscosity = dynamic_viscosity/density
-    #     self = Self(u_physical,u_lattice,L_physical,L_lattice,kinematic_viscosity,density)
+    def __init__(
+        out self,
+        u_physical:Self.Float_Scalar,
+        u_lattice:Self.Float_Scalar,
+        L_physical:Self.Float_Scalar,
+        L_lattice:Self.Float_Scalar,
+        density:Self.Float_Scalar,
+        *,
+        dynamic_viscosity:Self.Float_Scalar,
+        ):
+        kinematic_viscosity = dynamic_viscosity/density
+        self = Self(u_physical,u_lattice,L_physical,L_lattice,density,kinematic_viscosity)
+
+    def __init__(
+        out self,
+        u_physical:Self.Float_Scalar,
+        u_lattice:Self.Float_Scalar,
+        L_physical:Self.Float_Scalar,
+        L_lattice:Self.Float_Scalar,
+        density:Self.Float_Scalar,
+        *,
+        Re:Self.Float_Scalar,
+        ):
+        kinematic_viscosity = u_physical*L_physical/Re
+        self = Self(u_physical,u_lattice,L_physical,L_lattice,density,kinematic_viscosity)

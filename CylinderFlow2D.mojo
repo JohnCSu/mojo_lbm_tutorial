@@ -6,12 +6,14 @@ from std.collections import InlineArray
 from src.lbm import (
                     Flags,SOLID_NODE,FLUID_NODE,
                     LBM_Grid,LBM_Config,
-                    get_D2Q9,set_exterior_walls,calculate_rho_and_velocity)
+                    get_D2Q9,set_exterior_walls,calculate_rho_and_velocity,
+                    UnitSystem
+                    )
 
 from src.lbm.kernels.SRT import LBM_kernel
 from src.utils import Vector,ContextTileTensor
 from src.lbm.geometry.primatives import add_sphere,add_box
-
+from src.visualization import pyvista_viewer_import,grid_viewer
 comptime float_dtype = DType.float32
 comptime int_dtype = DType.int32
 comptime float_scalar = Scalar[float_dtype]
@@ -61,11 +63,15 @@ def main() raises:
     U:float_scalar = 0.1
     viscosity:float_scalar = 1/100.
     dt = dx*U/U_phs 
-    Re = 1/viscosity
-    L_lat:float_scalar = N
+    Re = U_phs*dx/viscosity
+    L_lat:float_scalar = 1
     v_lat = U*L_lat/Re
     tau = v_lat/(1/3.) +0.5
     print('Tau {}'.format(tau))
+
+    units = UnitSystem(U_phs,U,grid.dx,1,viscosity,1.)
+
+    print('Units Tau',units.tau)
 
     ctx = DeviceContext()
     
@@ -76,6 +82,8 @@ def main() raises:
 
     u = ContextTileTensor[float_dtype](ctx,velocity_layout)
     rho = ContextTileTensor[float_dtype](ctx,density_layout)
+    pv_view = pyvista_viewer_import()
+
 
     # Set up
     comptime if not config.DDF_shift:
@@ -86,21 +94,14 @@ def main() raises:
         f_out.fill(0.)
 
     # add_sphere[grid](flags.cpu(),center = [0.75,0.5,0.],radius = 0.1)
-    add_box[grid](flags.cpu(),center = [0.75,0.5,0.],box_radius = [0.1,0.1,0])    
+    add_box[grid](flags.cpu(),center = [0.75,0.5,0.],box_radius = [0.1,0.1,0])
+
     flag_np = flags.buffer_to_numpy().reshape(nx,ny)
-    pv = Python.import_module('pyvista')
-    np = Python.import_module('numpy')
-    x = np.linspace(0, grid.domain_size[0], nx)
-    y = np.linspace(0, grid.domain_size[1], ny)
-    m = np.meshgrid(x, y,indexing = 'ij')
-    xx,yy = m[0],m[1]
-    pv_mesh = pv.StructuredGrid(xx, yy, np.zeros_like(xx))
-    pv_mesh.point_data['Flags'] = flag_np.ravel()
-    plotter = pv.Plotter()
-    plotter.add_mesh(pv_mesh,scalars ='Flags',show_edges = False, cmap= 'jet',clim = [0,1],nan_color='white',)
-    plotter.view_xy()
-    plotter.show_axes()
-    plotter.show()
+
+    visualizer = grid_viewer[grid](subplot_shape= (1,1))
+    visualizer.add_point_data(flags=flag_np.ravel())
+    visualizer.set_mesh_display('flags')
+    visualizer.show()
 
     set_exterior_walls[grid,config](flags.cpu(),bc.cpu(),'+X',Flags.EQUILIBRIUM,[],1.)
     set_exterior_walls[grid,config](flags.cpu(),bc.cpu(),'-X',Flags.EQUILIBRIUM,[U,0],1.)
@@ -121,42 +122,33 @@ def main() raises:
 
     comptime get_u_and_rho = calculate_rho_and_velocity[grid,f_layout,density_layout,velocity_layout,config]
     calc_rho_and_u_gpu = ctx.compile_function[get_u_and_rho,get_u_and_rho]()
- 
+
     ctx.synchronize()
     comptime MAX_ITERS = 10_000
     # Run Simulation
     for t in range(MAX_ITERS):
-        ctx.enqueue_function(LBM_func,f_out.gpu(),f.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),1/tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
-        ctx.enqueue_function(LBM_func,f.gpu(),f_out.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),1/tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
-        if (t % (MAX_ITERS//10)) == 0 :
-            # pass
+        ctx.enqueue_function(LBM_func,f_out.gpu(),f.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
+        ctx.enqueue_function(LBM_func,f.gpu(),f_out.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),tau,grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
+        if (t % (MAX_ITERS//10)) == 0:
             ctx.synchronize()
             ctx.enqueue_function(calc_rho_and_u_gpu,f.gpu(),rho.gpu(),u.gpu(),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
             ctx.synchronize()
             u_np = u.buffer_to_numpy()/U
-            print('step = {} max ={} avg = {}'.format(t,u_np.max(),u_np.mean()))
+            print('step = {}, time = {} max ={} avg = {}'.format(t,t*dt,u_np.max(),u_np.mean()))
     ctx.synchronize()
     # Get Final U and rho
     ctx.enqueue_function(calc_rho_and_u_gpu,f.gpu(),rho.gpu(),u.gpu(),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
     ctx.synchronize()
     # return None
+    
     np = Python.import_module('numpy')
     pd = Python.import_module('pandas')
     pv = Python.import_module('pyvista')
     plt = Python.import_module('matplotlib.pyplot')
-    ctypes = Python.import_module("ctypes")
 
     u_np = (u.buffer_to_numpy()/U).reshape(D,nx,ny,nz)
-    print('step = {} max ={} avg = {}'.format(0,u_np.max(),u_np.mean()) )
-
-    x = np.linspace(0, grid.domain_size[0], nx)
-    y = np.linspace(0, grid.domain_size[1], ny)
-    m = np.meshgrid(x, y,indexing = 'ij')
-    xx,yy = m[0],m[1]
-    pv_mesh = pv.StructuredGrid(xx, yy, np.zeros_like(xx))
-    print(pv_mesh)
+    pv_mesh = grid_viewer[grid](subplot_shape= (1,1))
     
-
     u_plot = u_np[0,all_slice,all_slice,all_slice].T
     v_plot = u_np[1,all_slice,all_slice,all_slice].T
 
@@ -165,9 +157,6 @@ def main() raises:
     pv_mesh.point_data['U velocity'] = u_plot.ravel()
     pv_mesh.point_data['V velocity'] = v_plot.ravel()
     
-    plotter = pv.Plotter()
-    plotter.add_mesh(pv_mesh,scalars ='U_mag',show_edges = False, cmap= 'jet',clim = [0,1],nan_color='white',)
-    plotter.view_xy()
-    plotter.show_axes()
-    plotter.show() # screenshot = 'LDC_Re100.png'
+    pv_mesh.set_mesh_display('U_mag',clim = [0,1.5],cmap ='jet')
+    pv_mesh.show()
    

@@ -5,3 +5,4 @@ src/mojo_lbm_tutorial.egg-info/SOURCES.txt
 src/mojo_lbm_tutorial.egg-info/dependency_links.txt
 src/mojo_lbm_tutorial.egg-info/requires.txt
 src/mojo_lbm_tutorial.egg-info/top_level.txt
+src/visualization/pyvista_viewer.py

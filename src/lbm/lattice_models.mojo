@@ -6,20 +6,30 @@ struct LatticeModel[D:Int,Q:Int,float_dtype:DType,int_dtype:DType](ImplicitlyCop
     comptime dimension = Self.Q
     comptime int_scalar = Scalar[Self.int_dtype]
     comptime float_scalar = Scalar[Self.float_dtype]
-
+    comptime n_stress_components = Self.D*(Self.D+1)//2
     var directions:InlineArray[Self.int_vector,Self.Q]
     var float_directions:InlineArray[Self.float_vector,Self.Q]
-
+    var stress_indices:InlineArray[InlineArray[Self.int_scalar,2],Self.n_stress_components]
     var weights:Vector[Self.float_dtype,Self.Q]
     var opposite_indices:InlineArray[Self.int_scalar,Self.Q]
 
-    def __init__(out self,directions:InlineArray[Self.int_vector,Self.Q],float_directions:InlineArray[Self.float_vector,Self.Q],weights:Vector[Self.float_dtype,Self.Q]):
+    def __init__(
+        out self,
+        directions:InlineArray[Self.int_vector,Self.Q],
+        float_directions:InlineArray[Self.float_vector,Self.Q],
+        weights:Vector[Self.float_dtype,Self.Q]):
+
         self.directions = directions
         self.weights = weights
         self.opposite_indices = InlineArray[self.int_scalar,Self.Q](fill = 0)
         self.float_directions = float_directions
+        self.stress_indices = get_stress_indices[Self.D,self.int_dtype]()
+
         self._get_opposite_indices()
         
+
+
+
     def _get_opposite_indices(mut self):
         for i in range(Self.Q): # Cant be bothered making an effecient algorithim to search opposite
             opp_direction = self.directions[i].copy()
@@ -165,3 +175,33 @@ def get_D2Q9[float_dtype:DType = DType.float32,int_dtype:DType = DType.int32]() 
     
 
 
+
+def get_stress_indices[D:Int,dtype:DType]() -> InlineArray[InlineArray[Scalar[dtype],2],(D*(D+1))//2]:
+    comptime n = (D*(D+1))//2
+    comptime assert D == 1 or D == 2 or D == 3
+    comptime int_scalar = Scalar[dtype]
+    comptime if D == 1:
+        stress_indices: InlineArray[InlineArray[int_scalar,2],n] = [[0,0]]
+        return stress_indices
+    elif D == 2:
+        stress_indices: InlineArray[InlineArray[int_scalar,2],n] = [
+            [0,0],
+            [0,1],
+            [1,1]
+        ]
+        return stress_indices
+    elif D == 3:
+        stress_indices: InlineArray[InlineArray[int_scalar,2],n] = [
+            [0,0], # xx
+            [0,1], # xy
+            [0,2], # xz
+            [1,1], # yy 
+            [1,2], # yz
+            [2,2], # zz
+        ]
+        return stress_indices
+
+
+    else: # This is needed to make mojo happy. Cant happen with comptime asserts but in case of fallback set everything to -1
+        stress_indices =  InlineArray[InlineArray[int_scalar,2],n](fill = [-1,-1])
+        return stress_indices

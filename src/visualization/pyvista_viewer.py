@@ -42,10 +42,11 @@ class Pyvista_Visualizer():
     def cell_data(self):
         return self.mesh.cell_data
     
-    def set_mesh_display(self,to_plot:str,**kwargs):
+    def set_mesh_display(self,to_plot:str,subplot:tuple[int,int] = (0,0),**kwargs):
+        assert len(subplot) == 2
         self._set_mesh_display_called = True
         plotter = self.plotter
-        plotter.subplot(0,0)
+        plotter.subplot(*subplot)
         plotter.add_mesh(self.mesh, scalars = to_plot,**kwargs)
         plotter.view_xy()
     
@@ -111,12 +112,12 @@ class Pyvista_Visualizer():
         self.charts[subplot].line(x,y,label = label,**kwargs)
          
     
-    def set_Animation(self,name):
+    def set_animation(self,name):
         self.plotter.show(interactive_update= True)
         self.plotter.open_movie(name)
         
     
-    def update_charts_and_write_frame(self):
+    def update_frame(self):
         for key in self.charts.keys():
             lines = self.lines[key]
             for label in lines.keys():

@@ -30,16 +30,22 @@ def run_benchmark[float_dtype:DType,D:Int,Q:Int,
     ](mut b:Bencher) raises where tile_size >= 1 and f_layout.rank == 4 and flag_layout.rank == 3 and bc_layout.rank == 4 and velocity_layout.rank == 4 and density_layout.rank == 3:
     comptime GRID_DIM:Tuple[Int,Int,Int] = grid.GRID_DIM
     comptime BLOCK_SHAPE:Tuple[Int,Int,Int] = grid.BLOCK_SHAPE
-
+    comptime Float = Scalar[float_dtype]
+    comptime f_dtype = config.f_dtype.value() if config.f_dtype else float_dtype
     ctx = DeviceContext()
     flags = ContextTileTensor[DType.uint8](ctx,flag_layout)
     bc = ContextTileTensor[float_dtype](ctx,bc_layout)
-    f = ContextTileTensor[float_dtype](ctx,f_layout)
-    f_out = ContextTileTensor[float_dtype](ctx,f_layout)
+    f = ContextTileTensor[f_dtype](ctx,f_layout)
+    f_out = ContextTileTensor[f_dtype](ctx,f_layout)
 
     # Set up
-    f.fill(1./Scalar[float_dtype](Q))
-    f_out.fill(1./Scalar[float_dtype](Q))
+    comptime if not config.DDF_shift:
+        f.fill(Scalar[f_dtype](1./Float32(Q)))
+        f_out.fill(Scalar[f_dtype](1./Float32(Q)))
+    else:
+        f.fill(0)
+        f_out.fill(0)
+    
 
     set_exterior_walls[grid,config](flags.cpu(),bc.cpu(),'+Y',SOLID_NODE,[U,0,0],1.)
     set_exterior_walls[grid,config](flags.cpu(),bc.cpu(),'-Y',SOLID_NODE,[0,0,0],1.)
@@ -61,7 +67,7 @@ def run_benchmark[float_dtype:DType,D:Int,Q:Int,
     
     @always_inline
     def run_kernel(ctx:DeviceContext) capturing raises:
-        ctx.enqueue_function(LBM_func,f_out.gpu(),f.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),Float32(1/tau),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
+        ctx.enqueue_function(LBM_func,f_out.gpu(),f.gpu().as_immut(),bc.gpu().as_immut(),flags.gpu().as_immut(),Float(tau),grid_dim = GRID_DIM,block_dim = BLOCK_SHAPE)
 
     b.iter_custom[run_kernel](ctx)
     keep(f_out.gpu_buffer().unsafe_ptr())

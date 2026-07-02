@@ -4,3 +4,4 @@ run_benchmark
 *.nsys-rep
 mojo_testing*
 debug_fill.mojo
+*.gif

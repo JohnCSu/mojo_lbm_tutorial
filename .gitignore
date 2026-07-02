@@ -5,3 +5,4 @@ run_benchmark
 mojo_testing*
 debug_fill.mojo
 *.gif
+*.mojopkg

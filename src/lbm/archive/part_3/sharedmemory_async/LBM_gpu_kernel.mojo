@@ -1,7 +1,7 @@
 from std.gpu import block_dim,block_idx,thread_idx,barrier,grid_dim
 from layout import TileTensor,LayoutTensor,coord
 from layout.tile_tensor import stack_allocation
-from layout.tile_io import copy_dram_to_sram_async
+# from layout.tile_io import copy_dram_to_sram_async
 from layout.tile_layout import Layout,col_major,Coord,TensorLayout
 from std.gpu.memory import AddressSpace,async_copy_wait_all
 from src.lbm.lattice_models import LatticeModel
@@ -10,7 +10,6 @@ from src.lbm.flags import SOLID_NODE,FLUID_NODE
 from src.utils import Vector,ContextTileTensor
 from std.algorithm.functional import vectorize
 from std.sys import simd_width_of
-
 
 def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
                 lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
@@ -93,9 +92,9 @@ def LBM_kernel[ float_dtype:DType,D:Int,Q:Int,
     flags_tile_vec = flags_tile.vectorize[4,1,1]()
     shared_flags_vec = shared_flags_tile.vectorize[4,1,1]()
 
-    copy_dram_to_sram_async[col_major[tile_shape[0]//4,tile_shape[1],tile_shape[2]]()](dst = shared_flags_vec,src=flags_tile_vec)
-    async_copy_wait_all()
-    barrier()
+    # copy_dram_to_sram_async[col_major[tile_shape[0]//4,tile_shape[1],tile_shape[2]]()](dst = shared_flags_vec,src=flags_tile_vec)
+    # async_copy_wait_all()
+    # barrier()
     # Main Compute
     var f_new = Vector[float_dtype,Q](fill = 0.)
     var velocity = Vector[float_dtype,D](uninitialized= True)

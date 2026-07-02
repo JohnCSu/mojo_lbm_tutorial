@@ -16,7 +16,7 @@ from std.utils import Variant
 def benchmark_func_row_tile[
     float_dtype:DType,D:Int,Q:Int,
     lattice_model:LatticeModel[D,Q,float_dtype,DType.int32],
-    nx:Int,ny:Int,nz:Int,
+    nx:Int,ny:Int,nz:Int,tile_size:Int,
     //,
     grid: LBM_Grid[lattice_model,nx,ny,nz,tile_size],
     GRID_DIM:Tuple[Int,Int,Int],
@@ -74,7 +74,7 @@ def benchmark_func_row_tile[
 
     ctx.synchronize()
     #Compile Functions
-    LBM_func = ctx.compile_function[LBM_kernel[grid,f_layout,bc_layout,flag_layout,reorder_threads = reorder_threads],LBM_kernel[grid,f_layout,bc_layout,flag_layout,reorder_threads = reorder_threads]]()
+    LBM_func = ctx.compile_function[LBM_kernel[grid,f_layout,bc_layout,flag_layout],LBM_kernel[grid,f_layout,bc_layout,flag_layout]]()
     ctx.synchronize()
     
     @always_inline

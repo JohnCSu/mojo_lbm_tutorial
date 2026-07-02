@@ -59,7 +59,7 @@ comptime benchmark_7 = sharedmemory_p1.benchmark_func_col_tile_col_tiler[tiled_g
 comptime benchmark_8 = sharedmemory_all.benchmark_func_col_tile_col_tiler[tiled_grid,U,tau]
 # comptime benchmark_9 = sharedmemory_async.benchmark_func_col_tile_col_tiler[tiled_grid,U,tau]
 comptime benchmark_9 = SRT.layouts_benchmarks.benchmark_func_col_tile_col_tiler[tiled_grid,U,tau,LBM_Config()]
-# comptime benchmark_10 = SRT.layouts_benchmarks.benchmark_func_col_tile_col_tiler[tiled_grid,U,tau,LBM_Config(use_float16c = True,DDF_shift = True)]
+comptime benchmark_10 = SRT.layouts_benchmarks.benchmark_func_col_tile_col_tiler[tiled_grid,U,tau,LBM_Config(use_float16c = True,DDF_shift = True)]
 def main() raises:
     ctx = DeviceContext()
     total_bytes =  Q*num_points*2*4 + num_points*(D+1)*4 + num_points # 4btes per Q (fp32) , 4 byters per bc (fp32) , 1 byte per flag (fp) 
@@ -84,7 +84,7 @@ def main() raises:
     bench.bench_function[benchmark_7](BenchId('7. Shared Memory For Flags tile, Global Pull For boundary'))
     bench.bench_function[benchmark_8](BenchId('8. Map Flags + Halo region to Shared'))
     bench.bench_function[benchmark_9](BenchId('9. LBM with Default LBM_Config'))
-    # bench.bench_function[benchmark_10](BenchId('9. LBM float16c + DDF_shift'))
+    bench.bench_function[benchmark_10](BenchId('10. LBM float16c + DDF_shift'))
     
     
     
